@@ -40,18 +40,14 @@ def vector_search(query, collection):
     n_results=4
   )
   logging.info(f"chroma_results: {chroma_results}")
-  logging.info(f"##############################################")
   
   # Extract document IDs (flattened)
   document_ids = chroma_results['ids'][0]  
   logging.info(f"document_ids: {document_ids}")
-  logging.info(f"##############################################")
 
   # Retrieve documents
   chroma_doc_texts = []
   chroma_doc_metadata = []
-  # logging.info(f"chroma_doc_texts: {chroma_doc_texts}")
-  # logging.info(f"chroma_doc_metadata: {chroma_doc_metadata}")
   # Initialize metadatas as a list
   metadatas = []
   documents = []  
@@ -61,15 +57,13 @@ def vector_search(query, collection):
     logging.info(f"doc_info 56: {doc_info}")
 
     if doc_info:
-      #chroma_doc_texts.append(doc_info[0]['documents'])
-      #chroma_doc_metadata.append(doc_info[0]['metadata'])
+
       chroma_doc_texts.append(doc_info['documents'][0])
       chroma_doc_metadata.append(doc_info['metadatas'][0])
       metadata = doc_info['metadatas'][0] 
       metadatas.append(metadata)
       document = doc_info['documents'][0]
       documents.append(document)
-
 
     else:
       chroma_doc_texts.append("Document not found")
@@ -80,7 +74,7 @@ def vector_search(query, collection):
   # Extract titles 
   document_titles = [metadata.get("title", "Unknown Title") for metadata in chroma_doc_metadata]
   logging.info(f"document_titles: {document_titles}")
-  logging.info(f"##################document_titles: {document_titles}")
+
   # Generate scores dict
   scores_dict = {
     doc_id: round(random.uniform(0.7, 0.9), 2) for doc_id in document_ids
@@ -98,16 +92,12 @@ def vector_search(query, collection):
   #documents = [doc_info['documents'][0][0] for doc_info in collection.get(document_ids)]
   logging.info(f"################## documents: {documents}")
 
-  logging.info(f"scores: {scores}")  
-  logging.info(f"############# Vector Search Output #################################")
+  logging.info(f"scores: {scores}")
 
   # Log results
   logging.info(f"scores: {scores}")
   logging.info(f"document_ids: {document_ids}")
-  logging.info(f"##############################################")
 
-  #return scores, score_values, document_ids
-  #return scores, score_values, document_ids, metadatas
   return scores, score_values, document_ids, metadatas, documents
 
 # Reciprocal Rank Fusion algorithm
@@ -117,23 +107,15 @@ def reciprocal_rank_fusion(all_results, document_ids, k=60):
 
   #for query, doc_scores in search_results_dict.items():
   for query, result in all_results.items():
-
     logging.info(f"For query '{query}': {result}")
-    
-    #score_values = list(doc_scores.values())
     score_values = result["score_values"]
 
-    for rank, score in enumerate(sorted(score_values)):
-    
-      doc_id = document_ids[rank]
-      
+    for rank, score in enumerate(sorted(score_values)):    
+      doc_id = document_ids[rank]      
       if doc_id not in fused_scores:
-        fused_scores[doc_id] = 0
-        
-      previous_score = fused_scores[doc_id]
-      
-      fused_scores[doc_id] += 1 / (rank + k)
-      
+        fused_scores[doc_id] = 0        
+      previous_score = fused_scores[doc_id]      
+      fused_scores[doc_id] += 1 / (rank + k)      
       logging.info(f"Updating score for {doc_id} from {previous_score} to {fused_scores[doc_id]} based on rank {rank} in query '{query}'")
 
   reranked_results = {doc_id: score for doc_id, score in sorted(fused_scores.items(), key=lambda x: x[1], reverse=True)}
@@ -146,25 +128,13 @@ def generate_output(reranked_results, queries, metadatas, documents):
     # Extract the top-ranked document ID and its score
     top_document_id, top_score = next(iter(reranked_results.items()))
 
-    # Fetch the actual document title associated with the document ID
-    #top_document_title = document_titles.get(top_document_id, "Unknown Title")
-    logging.info(f"###################metadata###########################")    
+    # Fetch the actual document title associated with the document ID 
     logging.info(f"metadatas: {metadatas}")
-    logging.info(f"##############################################")
     top_doc_index = document_ids.index(top_document_id)
     logging.info(f"top_doc_index: {top_doc_index}")
     top_doc_metadata = metadatas[top_doc_index]
-
     logging.info(f"top_doc_metadata: {top_doc_metadata}")
-
-    #logging.info(f"metadatas: {metadatas[top_document_id]}")
-    #top_document_metadata = metadatas[top_document_id]
-    #top_document_title = top_document_metadata.get("title", "Unknown Title")
     top_document_title = top_doc_metadata.get("title", "Unknown Title")
-    
-
-    #top_document_title = metadatas.get(top_document_id, {}).get("title", "Unknown Title")
-
 
     # Generate_summary() generates a summary for the top document
     document_summary = generate_summary(top_document_id, metadatas, documents)  # Implement this function
@@ -191,7 +161,7 @@ collection = chroma_client.create_collection(name="all_documents")
 ## Replaced the "all_documents" section with the below chroma collection.
 #################################
 
-#Add some text documents to the collection
+#Added some text documents to the collection
 #Chroma will store your text, and handle tokenization, embedding, and indexing automatically.
 collection.add(
     documents=[
@@ -235,9 +205,9 @@ collection.add(
 def generate_summary(document_id, metadatas, documents):
     # Lookup document text
     doc_index = document_ids.index(document_id)
-    logging.info(f"meta_data gensummm: {metadatas}")
+    logging.info(f"meta_data: {metadatas}")
     logging.info(f"documents: {documents}")
-    #doc_text = metadatas[doc_index]['text']
+
     # Define the prompt for generating the summary
     prompt = f"Summarize the following document:\n{documents}\n\nSummary:"
 
@@ -251,23 +221,19 @@ def generate_summary(document_id, metadatas, documents):
     )
 
     # Extract the generated summary from the response
-    summary = response.choices[0].text.strip()
-    
+    summary = response.choices[0].text.strip()    
     return summary
 
 # Main function
 if __name__ == "__main__":
     # Define your Chroma collection and other necessary configurations here
-
     original_query = "impact of climate change"
     generated_queries = generate_queries_chatgpt(original_query)
     
     all_results = {}
     for query in generated_queries:
 
-      #scores, score_values, document_ids = vector_search(query, collection)
       scores, score_values, document_ids, metadatas, documents= vector_search(query, collection)
-
       
       all_results[query] = {
         "scores": scores,
@@ -275,19 +241,9 @@ if __name__ == "__main__":
       }
     
     logging.info(f"all_results: {all_results}")
-    logging.info(f"##############################################")
-    #reranked_results = reciprocal_rank_fusion(all_results)
     reranked_results = reciprocal_rank_fusion(all_results, document_ids)
-    logging.info(f"##############################################")
-    print("Final reranked results <bottom>:", reranked_results)
-    logging.info(f"##############################################")    
+    print("Final reranked results <bottom>:", reranked_results)  
     
-    #final_output = generate_output(reranked_results, generated_queries)
-    #final_output = generate_output(reranked_results, generated_queries, document_titles)
     final_output = generate_output(reranked_results, generated_queries, metadatas, documents)
-    #final_output = generate_output(reranked_results, generated_queries, metadatas)
-
-
-
     
     print(final_output)
