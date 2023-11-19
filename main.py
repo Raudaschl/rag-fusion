@@ -2,10 +2,6 @@ import os
 import openai
 import random
 import chromadb
-import logging
-
-# Initialize logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s', datefmt='%Y-%m-%d %H:%M:%S',filename='/tmp/ragfusion.log', filemode='w')
 
 
 # Initialize OpenAI API
@@ -39,11 +35,9 @@ def vector_search(query, collection):
     query_texts=[query],  
     n_results=4
   )
-  logging.info(f"chroma_results: {chroma_results}")
   
   # Extract document IDs (flattened)
   document_ids = chroma_results['ids'][0]  
-  logging.info(f"document_ids: {document_ids}")
 
   # Retrieve documents
   chroma_doc_texts = []
@@ -54,10 +48,8 @@ def vector_search(query, collection):
 
   for doc_id in document_ids:
     doc_info = collection.get(ids=[doc_id])
-    logging.info(f"doc_info 56: {doc_info}")
 
     if doc_info:
-
       chroma_doc_texts.append(doc_info['documents'][0])
       chroma_doc_metadata.append(doc_info['metadatas'][0])
       metadata = doc_info['metadatas'][0] 
@@ -70,10 +62,8 @@ def vector_search(query, collection):
       chroma_doc_metadata.append({})
 
   document_ids = chroma_results['ids'][0]
-  logging.info(f"document_ids: {document_ids}")
   # Extract titles 
   document_titles = [metadata.get("title", "Unknown Title") for metadata in chroma_doc_metadata]
-  logging.info(f"document_titles: {document_titles}")
 
   # Generate scores dict
   scores_dict = {
@@ -85,18 +75,10 @@ def vector_search(query, collection):
     "titles": document_titles, 
     "scores": scores_dict
   }
-  logging.info(f"################## doc_info: {doc_info}")
   # Extract just the score values into a list 
   score_values = list(scores_dict.values())
   # Also build documents list
   #documents = [doc_info['documents'][0][0] for doc_info in collection.get(document_ids)]
-  logging.info(f"################## documents: {documents}")
-
-  logging.info(f"scores: {scores}")
-
-  # Log results
-  logging.info(f"scores: {scores}")
-  logging.info(f"document_ids: {document_ids}")
 
   return scores, score_values, document_ids, metadatas, documents
 
@@ -107,7 +89,6 @@ def reciprocal_rank_fusion(all_results, document_ids, k=60):
 
   #for query, doc_scores in search_results_dict.items():
   for query, result in all_results.items():
-    logging.info(f"For query '{query}': {result}")
     score_values = result["score_values"]
 
     for rank, score in enumerate(sorted(score_values)):    
@@ -115,8 +96,7 @@ def reciprocal_rank_fusion(all_results, document_ids, k=60):
       if doc_id not in fused_scores:
         fused_scores[doc_id] = 0        
       previous_score = fused_scores[doc_id]      
-      fused_scores[doc_id] += 1 / (rank + k)      
-      logging.info(f"Updating score for {doc_id} from {previous_score} to {fused_scores[doc_id]} based on rank {rank} in query '{query}'")
+      fused_scores[doc_id] += 1 / (rank + k)
 
   reranked_results = {doc_id: score for doc_id, score in sorted(fused_scores.items(), key=lambda x: x[1], reverse=True)}
   
@@ -129,11 +109,8 @@ def generate_output(reranked_results, queries, metadatas, documents):
     top_document_id, top_score = next(iter(reranked_results.items()))
 
     # Fetch the actual document title associated with the document ID 
-    logging.info(f"metadatas: {metadatas}")
     top_doc_index = document_ids.index(top_document_id)
-    logging.info(f"top_doc_index: {top_doc_index}")
     top_doc_metadata = metadatas[top_doc_index]
-    logging.info(f"top_doc_metadata: {top_doc_metadata}")
     top_document_title = top_doc_metadata.get("title", "Unknown Title")
 
     # Generate_summary() generates a summary for the top document
@@ -205,8 +182,6 @@ collection.add(
 def generate_summary(document_id, metadatas, documents):
     # Lookup document text
     doc_index = document_ids.index(document_id)
-    logging.info(f"meta_data: {metadatas}")
-    logging.info(f"documents: {documents}")
 
     # Define the prompt for generating the summary
     prompt = f"Summarize the following document:\n{documents}\n\nSummary:"
@@ -240,7 +215,6 @@ if __name__ == "__main__":
         "score_values": score_values
       }
     
-    logging.info(f"all_results: {all_results}")
     reranked_results = reciprocal_rank_fusion(all_results, document_ids)
     print("Final reranked results <bottom>:", reranked_results)  
     
