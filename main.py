@@ -5,16 +5,24 @@ import chromadb
 
 load_dotenv()
 
-# Initialize OpenAI client
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-if not client.api_key:
-    raise Exception("No OpenAI API key found. Please set the OPENAI_API_KEY environment variable.")
+_client = None
+
+
+def get_client():
+    """Lazy initialization of OpenAI client."""
+    global _client
+    if _client is None:
+        api_key = os.getenv("OPENAI_API_KEY")
+        if not api_key:
+            raise Exception("No OpenAI API key found. Please set the OPENAI_API_KEY environment variable.")
+        _client = OpenAI(api_key=api_key)
+    return _client
 
 
 def generate_queries_chatgpt(original_query):
     """Generate multiple search queries from a single input query using ChatGPT."""
-    response = client.chat.completions.create(
-        model="gpt-3.5-turbo",
+    response = get_client().chat.completions.create(
+        model="gpt-5.1-chat-latest",
         messages=[
             {"role": "system", "content": "You are a helpful assistant that generates multiple search queries based on a single input query."},
             {"role": "user", "content": f"Generate multiple search queries related to: {original_query}"},
@@ -81,9 +89,34 @@ def reciprocal_rank_fusion(search_results_dict, k=60):
     return reranked_results
 
 
-def generate_output(reranked_results, queries):
+def generate_output(reranked_results, queries, collection=None, original_query=None, use_llm=False):
     """Produce a final output from the reranked documents."""
-    return f"Final output based on {queries} and reranked documents: {list(reranked_results.keys())}"
+    if not use_llm:
+        return f"Final output based on {queries} and reranked documents: {list(reranked_results.keys())}"
+
+    # Retrieve document text from collection
+    doc_ids = list(reranked_results.keys())
+    docs = collection.get(ids=doc_ids)
+    doc_texts = "\n".join(f"- {text}" for text in docs["documents"])
+
+    all_queries = "\n".join(f"- {q}" for q in queries)
+
+    prompt = (
+        f"Based on the following reranked documents and queries, generate a comprehensive answer.\n"
+        f"Give more weight to the original query: \"{original_query}\"\n\n"
+        f"Queries:\n{all_queries}\n\n"
+        f"Reranked documents:\n{doc_texts}\n\n"
+        f"Provide a well-structured response that synthesizes the information from these documents."
+    )
+
+    response = get_client().chat.completions.create(
+        model="gpt-5.1-chat-latest",
+        messages=[
+            {"role": "system", "content": "You are a helpful assistant that synthesizes search results into a comprehensive answer."},
+            {"role": "user", "content": prompt}
+        ]
+    )
+    return response.choices[0].message.content.strip()
 
 
 if __name__ == "__main__":
@@ -93,11 +126,16 @@ if __name__ == "__main__":
     collection = create_collection()
 
     all_results = {}
-    for query in generated_queries:
+    # Search original query alongside generated ones (per article)
+    all_queries = [original_query] + generated_queries
+    for query in all_queries:
         search_results = vector_search(query, collection)
         all_results[query] = search_results
 
     reranked_results = reciprocal_rank_fusion(all_results)
 
-    final_output = generate_output(reranked_results, generated_queries)
+    final_output = generate_output(
+        reranked_results, all_queries,
+        collection=collection, original_query=original_query, use_llm=True
+    )
     print(final_output)

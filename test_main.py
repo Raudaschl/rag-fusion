@@ -60,3 +60,13 @@ def test_generate_output():
     assert "doc1" in output
     assert "q1" in output
     assert "q2" in output
+
+
+def test_generate_output_accepts_new_params():
+    """Verify generate_output accepts the new parameters and still works with use_llm=False."""
+    reranked = {"doc2": 0.5, "doc1": 0.3}
+    queries = ["q1", "q2"]
+    collection = create_collection()
+    output = generate_output(reranked, queries, collection=collection, original_query="test query", use_llm=False)
+    assert "doc2" in output
+    assert "doc1" in output
