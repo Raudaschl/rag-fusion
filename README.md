@@ -2,49 +2,117 @@
 
 ## Overview
 
-The code accompanying this README is an implementation of RAG-Fusion, a search methodology that aims to bridge the gap between traditional search paradigms and the multifaceted dimensions of human queries. Inspired by the capabilities of Retrieval Augmented Generation (RAG), this project goes a step further by employing multiple query generation and Reciprocal Rank Fusion to re-rank search results. The overarching goal is to move closer to unearthing that elusive 90% of transformative knowledge that often remains hidden behind top search results.
+RAG-Fusion is a search methodology that aims to bridge the gap between traditional search paradigms and the multifaceted dimensions of human queries. Where Retrieval Augmented Generation (RAG) fuses vector search with generative models, RAG-Fusion goes a step further — employing multiple query generation and Reciprocal Rank Fusion to re-rank search results. The overarching goal is to move closer to unearthing that elusive 90% of transformative knowledge that often remains hidden behind top search results.
 
-## Context
+For the full story behind the approach, see the article: [Forget RAG, the Future is RAG-Fusion](https://adrianraudaschl.com/blog/forget-rag-the-future-is-rag-fusion/).
 
-The rise of Retrieval Augmented Generation (RAG) has shifted paradigms in the AI and search space by fusing the power of vector search with generative models. However, the technology is not without its constraints. Traditional search methods often fall short when it comes to understanding the nuances and complexities of human queries.
+## How It Works
 
-That's where RAG-Fusion comes in. Detailed in the article, [Forget RAG, the Future is RAG-Fusion](https://medium.com/data-science/forget-rag-the-future-is-rag-fusion-1147298d8ad1), this methodology aims to tackle these challenges head-on.
+```
+                    ┌─────────────────┐
+                    │  Original Query  │
+                    └────────┬────────┘
+                             │
+                    ┌────────▼────────┐
+                    │   LLM generates  │
+                    │  multiple queries │
+                    └────────┬────────┘
+                             │
+              ┌──────────────┼──────────────┐
+              │              │              │
+        ┌─────▼─────┐ ┌─────▼─────┐ ┌─────▼─────┐
+        │  Vector    │ │  Vector    │ │  Vector    │
+        │  Search 1  │ │  Search 2  │ │  Search N  │
+        └─────┬─────┘ └─────┬─────┘ └─────┬─────┘
+              │              │              │
+              └──────────────┼──────────────┘
+                             │
+                    ┌────────▼────────┐
+                    │  Reciprocal Rank │
+                    │     Fusion       │
+                    └────────┬────────┘
+                             │
+                    ┌────────▼────────┐
+                    │  Re-ranked Docs   │
+                    └──────────────────┘
+```
 
-## What The Code Does
+1. **Query Generation** — Takes a user's query and uses OpenAI's GPT to generate multiple search query variations that capture different facets of the original intent.
 
-1. **Query Generation**: The system starts by generating multiple queries from a user's initial query using OpenAI's GPT model.
-  
-2. **Vector Search**: Conducts vector-based searches using ChromaDB on each of the generated queries to retrieve relevant documents from a predefined set.
+2. **Vector Search** — Conducts vector-based searches using ChromaDB on each query, casting a wider net across the document space.
 
-3. **Reciprocal Rank Fusion**: Applies the Reciprocal Rank Fusion algorithm to re-rank the documents based on their relevance across multiple queries.
+3. **Reciprocal Rank Fusion** — Combines the ranked results from all searches, boosting documents that appear consistently across multiple query perspectives.
 
-4. **Output Generation**: Produces a final output consisting of the re-ranked list of documents.
+4. **Output Generation** — Produces a final re-ranked list of documents, optionally synthesised into a natural language answer via LLM.
 
-## How to Run the Code
+## Project Structure
 
-1. Install the required dependencies:
+```
+├── main.py              # Core RAG-Fusion pipeline
+├── evaluate.py          # Evaluation CLI entry point
+├── test_main.py         # Unit tests
+├── eval/
+│   ├── dataset.py       # NFCorpus download & loading
+│   ├── metrics.py       # IR metrics (Precision, Recall, NDCG, MRR)
+│   └── retrieval.py     # Baseline & RAG-Fusion retrieval wrappers
+└── .env.example         # Environment template
+```
+
+## Getting Started
+
+1. Install dependencies:
    ```bash
-   pip install openai chromadb python-dotenv
+   pip install openai chromadb python-dotenv tqdm tabulate
    ```
-2. Copy the example environment file and add your OpenAI API key:
+
+2. Set up your OpenAI API key:
    ```bash
    cp .env.example .env
    ```
    Then edit `.env` and replace `your-key-here` with your actual key.
-3. Run the script:
+
+3. Run the demo:
    ```bash
    python main.py
    ```
 
-## How to Run Tests
+4. Run the tests (no API key needed):
+   ```bash
+   python -m pytest test_main.py -v
+   ```
+
+## Evaluation
+
+To move beyond toy examples, the repo includes a quantitative evaluation harness that compares single-query baseline retrieval against RAG-Fusion on a real dataset. It uses [NFCorpus](https://www.cl.uni-heidelberg.de/statnlpgroup/nfcorpus/) (3,633 medical/nutrition documents, 323 test queries with graded relevance judgments) from the [BEIR benchmark](https://github.com/beir-cellar/beir).
+
+### Results (50 queries, seed=42)
+
+| Metric    | k  | Baseline | RAG-Fusion | Delta   |
+|-----------|----|----------|------------|---------|
+| Precision | 5  | 0.264    | 0.276      | +4.5%   |
+| Precision | 10 | 0.222    | 0.246      | +10.8%  |
+| Precision | 20 | 0.180    | 0.199      | +10.6%  |
+| Recall    | 5  | 0.110    | 0.165      | +50.8%  |
+| Recall    | 10 | 0.133    | 0.195      | +46.9%  |
+| Recall    | 20 | 0.184    | 0.234      | +27.1%  |
+| NDCG      | 5  | 0.304    | 0.348      | +14.3%  |
+| NDCG      | 10 | 0.286    | 0.339      | +18.5%  |
+| NDCG      | 20 | 0.280    | 0.327      | +16.9%  |
+| MRR       | -  | 0.440    | 0.476      | +8.1%   |
+
+RAG-Fusion shows consistent improvements across all metrics, with the largest gains in **recall** (+27-51%) — generating multiple query variations surfaces relevant documents that a single query misses. This is exactly the kind of hidden knowledge retrieval that the approach was designed to unlock.
+
+### Running the evaluation
 
 ```bash
-pip install pytest
-python -m pytest test_main.py -v
+# Baseline only (no API key needed)
+python evaluate.py --sample 10 --methods baseline
+
+# Full comparison (requires OPENAI_API_KEY)
+python evaluate.py --sample 50
+
+# Custom parameters
+python evaluate.py --sample 100 --k 5 10 --data-dir ./datasets
 ```
 
-Tests cover collection creation, vector search, relevance ranking, Reciprocal Rank Fusion, and output formatting. No API key is needed to run tests.
-
-## Why RAG-Fusion?
-
-RAG-Fusion is an ongoing experiment that aims to make search smarter and more context-aware, thus helping us uncover the richer, deeper strata of information that we might not have found otherwise.
+The NFCorpus dataset (~3MB) is downloaded automatically on first run. ChromaDB embeddings are persisted locally so subsequent runs skip ingestion.

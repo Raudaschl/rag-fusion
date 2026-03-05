@@ -21,5 +21,9 @@ coverage.xml
 .idea/
 .claude/
 
+# Eval data
+datasets/
+chroma_eval_db/
+
 # OS
 .DS_Store

@@ -56,9 +56,9 @@ def create_collection():
     return collection
 
 
-def vector_search(query, collection):
+def vector_search(query, collection, n_results=5):
     """Search the ChromaDB collection and return results with real similarity scores."""
-    results = collection.query(query_texts=[query], n_results=5)
+    results = collection.query(query_texts=[query], n_results=n_results)
 
     # ChromaDB returns distances (lower = more similar), convert to similarity scores
     scores = {}
@@ -68,13 +68,14 @@ def vector_search(query, collection):
     return dict(sorted(scores.items(), key=lambda x: x[1], reverse=True))
 
 
-def reciprocal_rank_fusion(search_results_dict, k=60):
+def reciprocal_rank_fusion(search_results_dict, k=60, verbose=True):
     """Combine multiple ranked lists using Reciprocal Rank Fusion."""
     fused_scores = {}
 
-    print("Initial individual search result ranks:")
-    for query, doc_scores in search_results_dict.items():
-        print(f"For query '{query}': {doc_scores}")
+    if verbose:
+        print("Initial individual search result ranks:")
+        for query, doc_scores in search_results_dict.items():
+            print(f"For query '{query}': {doc_scores}")
 
     for query, doc_scores in search_results_dict.items():
         for rank, (doc, _) in enumerate(sorted(doc_scores.items(), key=lambda x: x[1], reverse=True)):
@@ -82,10 +83,12 @@ def reciprocal_rank_fusion(search_results_dict, k=60):
                 fused_scores[doc] = 0
             previous_score = fused_scores[doc]
             fused_scores[doc] += 1 / (rank + k)
-            print(f"Updating score for {doc} from {previous_score} to {fused_scores[doc]} based on rank {rank} in query '{query}'")
+            if verbose:
+                print(f"Updating score for {doc} from {previous_score} to {fused_scores[doc]} based on rank {rank} in query '{query}'")
 
     reranked_results = dict(sorted(fused_scores.items(), key=lambda x: x[1], reverse=True))
-    print("Final reranked results:", reranked_results)
+    if verbose:
+        print("Final reranked results:", reranked_results)
     return reranked_results
 
 
