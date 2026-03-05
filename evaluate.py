@@ -9,6 +9,14 @@ from eval.dataset import download_nfcorpus, load_nfcorpus, load_into_chromadb, s
 from eval.retrieval import single_query_retrieve, rag_fusion_retrieve, run_evaluation
 
 
+def positive_int(value):
+    """Argparse type for integers greater than zero."""
+    parsed = int(value)
+    if parsed <= 0:
+        raise argparse.ArgumentTypeError("k values must be greater than 0")
+    return parsed
+
+
 def build_comparison_table(baseline_metrics, fusion_metrics, k_values):
     """Build a comparison table of metrics across methods."""
     rows = []
@@ -87,7 +95,8 @@ def show_example_queries(query_ids, queries, qrels, collection, baseline_metrics
 def main():
     parser = argparse.ArgumentParser(description="Evaluate RAG-Fusion against baseline retrieval on NFCorpus.")
     parser.add_argument("--sample", type=int, default=50, help="Number of queries to sample (default: 50)")
-    parser.add_argument("--k", type=int, nargs="+", default=[5, 10, 20], help="k values for evaluation (default: 5 10 20)")
+    parser.add_argument("--k", type=positive_int, nargs="+", default=[5, 10, 20],
+                        help="k values for evaluation; each must be > 0 (default: 5 10 20)")
     parser.add_argument("--data-dir", type=str, default="./datasets", help="Data directory (default: ./datasets)")
     parser.add_argument("--methods", type=str, nargs="+", default=["baseline", "rag-fusion"],
                         choices=["baseline", "rag-fusion"], help="Methods to evaluate (default: baseline rag-fusion)")
@@ -97,8 +106,9 @@ def main():
     download_nfcorpus(data_dir=args.data_dir)
     corpus, queries, qrels = load_nfcorpus(data_dir=args.data_dir)
 
-    # Load into ChromaDB
-    collection = load_into_chromadb(corpus)
+    # Keep the persistent index scoped to the selected dataset directory.
+    db_path = os.path.join(args.data_dir, "chroma_eval_db")
+    collection = load_into_chromadb(corpus, db_path=db_path)
 
     # Sample queries
     query_ids = sample_queries(queries, qrels, n=args.sample)

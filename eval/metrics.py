@@ -3,6 +3,8 @@ import math
 
 def precision_at_k(retrieved, relevant, k):
     """Precision at rank k."""
+    if k <= 0:
+        raise ValueError("k must be greater than 0")
     retrieved_at_k = retrieved[:k]
     relevant_count = sum(1 for doc_id in retrieved_at_k if doc_id in relevant)
     return relevant_count / k
