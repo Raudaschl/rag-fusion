@@ -19,15 +19,23 @@ def get_client():
     return _client
 
 
-def generate_queries_chatgpt(original_query):
+def generate_queries_chatgpt(original_query, diverse=False):
     """Generate multiple search queries from a single input query using ChatGPT."""
-    response = get_client().chat.completions.create(
-        model="gpt-5.1-chat-latest",
-        messages=[
+    if diverse:
+        messages = [
+            {"role": "system", "content": "You are a search expert. Generate diverse search queries that explore different aspects of the user's question. Each query should target a different angle: use synonyms, vary specificity (broader/narrower), and consider related sub-topics. Avoid generating queries that are just minor rewordings of each other."},
+            {"role": "user", "content": f"Generate 4 diverse search queries for: {original_query}"},
+            {"role": "user", "content": "OUTPUT (4 queries):"}
+        ]
+    else:
+        messages = [
             {"role": "system", "content": "You are a helpful assistant that generates multiple search queries based on a single input query."},
             {"role": "user", "content": f"Generate multiple search queries related to: {original_query}"},
             {"role": "user", "content": "OUTPUT (4 queries):"}
         ]
+    response = get_client().chat.completions.create(
+        model="gpt-5.1-chat-latest",
+        messages=messages
     )
     generated_queries = response.choices[0].message.content.strip().split("\n")
     return generated_queries
@@ -68,7 +76,7 @@ def vector_search(query, collection, n_results=5):
     return dict(sorted(scores.items(), key=lambda x: x[1], reverse=True))
 
 
-def reciprocal_rank_fusion(search_results_dict, k=60, verbose=True):
+def reciprocal_rank_fusion(search_results_dict, k=60, verbose=True, query_weights=None):
     """Combine multiple ranked lists using Reciprocal Rank Fusion."""
     fused_scores = {}
 
@@ -78,11 +86,12 @@ def reciprocal_rank_fusion(search_results_dict, k=60, verbose=True):
             print(f"For query '{query}': {doc_scores}")
 
     for query, doc_scores in search_results_dict.items():
+        weight = query_weights.get(query, 1.0) if query_weights else 1.0
         for rank, (doc, _) in enumerate(sorted(doc_scores.items(), key=lambda x: x[1], reverse=True)):
             if doc not in fused_scores:
                 fused_scores[doc] = 0
             previous_score = fused_scores[doc]
-            fused_scores[doc] += 1 / (rank + k)
+            fused_scores[doc] += weight * (1 / (rank + k))
             if verbose:
                 print(f"Updating score for {doc} from {previous_score} to {fused_scores[doc]} based on rank {rank} in query '{query}'")
 

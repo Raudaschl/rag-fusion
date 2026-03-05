@@ -6,7 +6,10 @@ import os
 from tabulate import tabulate
 
 from eval.dataset import download_nfcorpus, load_nfcorpus, load_into_chromadb, sample_queries
-from eval.retrieval import single_query_retrieve, rag_fusion_retrieve, run_evaluation
+from eval.retrieval import (
+    single_query_retrieve, rag_fusion_retrieve,
+    rag_fusion_diverse_retrieve, rag_fusion_weighted_retrieve, run_evaluation,
+)
 
 
 def positive_int(value):
@@ -17,8 +20,14 @@ def positive_int(value):
     return parsed
 
 
-def build_comparison_table(baseline_metrics, fusion_metrics, k_values):
-    """Build a comparison table of metrics across methods."""
+def build_comparison_table(all_metrics, k_values):
+    """Build a comparison table of metrics across methods.
+
+    Args:
+        all_metrics: dict of {method_name: metrics_dict}
+        k_values: list of k values used in evaluation
+    """
+    method_names = list(all_metrics.keys())
     rows = []
     metric_names = ["Precision", "Recall", "NDCG"]
 
@@ -26,30 +35,22 @@ def build_comparison_table(baseline_metrics, fusion_metrics, k_values):
         key_prefix = name.lower()
         for k in k_values:
             key = f"{key_prefix}@{k}"
-            b_val = baseline_metrics.get(key) if baseline_metrics else None
-            f_val = fusion_metrics.get(key) if fusion_metrics else None
-            delta = _format_delta(b_val, f_val)
-            rows.append([
-                name,
-                k,
-                f"{b_val:.3f}" if b_val is not None else "N/A",
-                f"{f_val:.3f}" if f_val is not None else "N/A",
-                delta,
-            ])
+            row = [name, k]
+            for method in method_names:
+                m = all_metrics[method]
+                val = m.get(key) if m else None
+                row.append(f"{val:.3f}" if val is not None else "N/A")
+            rows.append(row)
 
     # MRR row
-    b_mrr = baseline_metrics.get("mrr") if baseline_metrics else None
-    f_mrr = fusion_metrics.get("mrr") if fusion_metrics else None
-    delta = _format_delta(b_mrr, f_mrr)
-    rows.append([
-        "MRR",
-        "-",
-        f"{b_mrr:.3f}" if b_mrr is not None else "N/A",
-        f"{f_mrr:.3f}" if f_mrr is not None else "N/A",
-        delta,
-    ])
+    row = ["MRR", "-"]
+    for method in method_names:
+        m = all_metrics[method]
+        val = m.get("mrr") if m else None
+        row.append(f"{val:.3f}" if val is not None else "N/A")
+    rows.append(row)
 
-    headers = ["Metric", "k", "Baseline", "RAG-Fusion", "Delta"]
+    headers = ["Metric", "k"] + method_names
     return tabulate(rows, headers=headers, tablefmt="grid")
 
 
@@ -63,7 +64,7 @@ def _format_delta(baseline_val, fusion_val):
     return f"{sign}{pct:.1f}%"
 
 
-def show_example_queries(query_ids, queries, qrels, collection, baseline_metrics, fusion_metrics):
+def show_example_queries(query_ids, queries, qrels, collection, methods, method_registry):
     """Display top-5 docs from each method for 3 example queries, marking relevant ones."""
     example_ids = query_ids[:3]
 
@@ -75,17 +76,13 @@ def show_example_queries(query_ids, queries, qrels, collection, baseline_metrics
         print(f"\nQuery [{qid}]: {query_text}")
         print("-" * 60)
 
-        if baseline_metrics is not None:
-            baseline_docs = single_query_retrieve(query_text, collection, k=5)
-            print("  Baseline top-5:")
-            for i, doc_id in enumerate(baseline_docs, 1):
-                marker = " *" if doc_id in relevant else ""
-                print(f"    {i}. {doc_id}{marker}")
-
-        if fusion_metrics is not None:
-            fusion_docs = rag_fusion_retrieve(query_text, collection, k=5)
-            print("  RAG-Fusion top-5:")
-            for i, doc_id in enumerate(fusion_docs, 1):
+        for method_key in methods:
+            display_name, method_fn, needs_api_key = method_registry[method_key]
+            if needs_api_key and not os.getenv("OPENAI_API_KEY"):
+                continue
+            docs = method_fn(query_text, collection, k=5)
+            print(f"  {display_name} top-5:")
+            for i, doc_id in enumerate(docs, 1):
                 marker = " *" if doc_id in relevant else ""
                 print(f"    {i}. {doc_id}{marker}")
 
@@ -99,7 +96,8 @@ def main():
                         help="k values for evaluation; each must be > 0 (default: 5 10 20)")
     parser.add_argument("--data-dir", type=str, default="./datasets", help="Data directory (default: ./datasets)")
     parser.add_argument("--methods", type=str, nargs="+", default=["baseline", "rag-fusion"],
-                        choices=["baseline", "rag-fusion"], help="Methods to evaluate (default: baseline rag-fusion)")
+                        choices=["baseline", "rag-fusion", "rag-fusion-diverse", "rag-fusion-weighted"],
+                        help="Methods to evaluate (default: baseline rag-fusion)")
     args = parser.parse_args()
 
     # Download and load dataset
@@ -114,31 +112,31 @@ def main():
     query_ids = sample_queries(queries, qrels, n=args.sample)
     print(f"\nSampled {len(query_ids)} queries for evaluation.\n")
 
-    baseline_metrics = None
-    fusion_metrics = None
+    method_registry = {
+        "baseline": ("Baseline", single_query_retrieve, False),
+        "rag-fusion": ("RAG-Fusion", rag_fusion_retrieve, True),
+        "rag-fusion-diverse": ("+Diverse", rag_fusion_diverse_retrieve, True),
+        "rag-fusion-weighted": ("+Diverse+Weighted", rag_fusion_weighted_retrieve, True),
+    }
 
-    # Run baseline
-    if "baseline" in args.methods:
-        print("Running baseline (single-query) retrieval ...")
-        baseline_metrics = run_evaluation(query_ids, queries, qrels, collection, single_query_retrieve, args.k)
-        print("Baseline evaluation complete.\n")
-
-    # Run RAG-Fusion
-    if "rag-fusion" in args.methods:
-        if not os.getenv("OPENAI_API_KEY"):
-            print("WARNING: OPENAI_API_KEY not set. Skipping RAG-Fusion evaluation.\n")
-        else:
-            print("Running RAG-Fusion retrieval ...")
-            fusion_metrics = run_evaluation(query_ids, queries, qrels, collection, rag_fusion_retrieve, args.k)
-            print("RAG-Fusion evaluation complete.\n")
+    all_metrics = {}
+    for method_key in args.methods:
+        display_name, method_fn, needs_api_key = method_registry[method_key]
+        if needs_api_key and not os.getenv("OPENAI_API_KEY"):
+            print(f"WARNING: OPENAI_API_KEY not set. Skipping {display_name}.\n")
+            all_metrics[display_name] = None
+            continue
+        print(f"Running {display_name} retrieval ...")
+        all_metrics[display_name] = run_evaluation(query_ids, queries, qrels, collection, method_fn, args.k)
+        print(f"{display_name} evaluation complete.\n")
 
     # Display comparison table
-    print(build_comparison_table(baseline_metrics, fusion_metrics, args.k))
+    print(build_comparison_table(all_metrics, args.k))
 
-    # Show example queries
-    if baseline_metrics is not None or fusion_metrics is not None:
+    # Show example queries if any method produced results
+    if any(v is not None for v in all_metrics.values()):
         print("\n--- Example Queries (top-5 results) ---")
-        show_example_queries(query_ids, queries, qrels, collection, baseline_metrics, fusion_metrics)
+        show_example_queries(query_ids, queries, qrels, collection, args.methods, method_registry)
 
 
 if __name__ == "__main__":

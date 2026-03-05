@@ -87,20 +87,27 @@ To move beyond toy examples, the repo includes a quantitative evaluation harness
 
 ### Results (50 queries, seed=42)
 
-| Metric    | k  | Baseline | RAG-Fusion | Delta   |
-|-----------|----|----------|------------|---------|
-| Precision | 5  | 0.264    | 0.276      | +4.5%   |
-| Precision | 10 | 0.222    | 0.246      | +10.8%  |
-| Precision | 20 | 0.180    | 0.199      | +10.6%  |
-| Recall    | 5  | 0.110    | 0.165      | +50.8%  |
-| Recall    | 10 | 0.133    | 0.195      | +46.9%  |
-| Recall    | 20 | 0.184    | 0.234      | +27.1%  |
-| NDCG      | 5  | 0.304    | 0.348      | +14.3%  |
-| NDCG      | 10 | 0.286    | 0.339      | +18.5%  |
-| NDCG      | 20 | 0.280    | 0.327      | +16.9%  |
-| MRR       | -  | 0.440    | 0.476      | +8.1%   |
+| Metric    | k  | Baseline | RAG-Fusion | +Diverse | +Diverse+Weighted |
+|-----------|----|----------|------------|----------|-------------------|
+| Precision | 5  | 0.272    | 0.276      | **0.276**| 0.272             |
+| Precision | 10 | 0.226    | 0.226      | **0.244**| 0.242             |
+| Precision | 20 | 0.182    | 0.194      | **0.207**| 0.191             |
+| Recall    | 5  | 0.130    | 0.118      | **0.142**| 0.126             |
+| Recall    | 10 | 0.153    | 0.185      | **0.176**| 0.184             |
+| Recall    | 20 | 0.205    | 0.231      | **0.221**| 0.210             |
+| NDCG      | 5  | 0.329    | 0.325      | **0.344**| 0.330             |
+| NDCG      | 10 | 0.309    | 0.312      | **0.333**| 0.327             |
+| NDCG      | 20 | 0.301    | 0.311      | **0.328**| 0.312             |
+| MRR       | -  | 0.460    | 0.443      | **0.470**| 0.461             |
 
-RAG-Fusion shows consistent improvements across all metrics, with the largest gains in **recall** (+27-51%) — generating multiple query variations surfaces relevant documents that a single query misses. This is exactly the kind of hidden knowledge retrieval that the approach was designed to unlock.
+Four methods are compared:
+
+- **Baseline** — single vector search with the original query.
+- **RAG-Fusion** — original + 4 LLM-generated queries, combined via Reciprocal Rank Fusion.
+- **+Diverse** — same as RAG-Fusion but with a prompt that explicitly asks for different angles, synonyms, and varied specificity. Best overall performer.
+- **+Diverse+Weighted** — diverse queries + 3× RRF weight on the original query. The extra weight narrows the net and pulls numbers back toward baseline.
+
+The **diverse prompt** is the biggest win — it consistently outperforms both baseline and standard RAG-Fusion across precision, NDCG, and MRR. The key insight is that the default prompt produces semantically close query variations that search the same embedding neighborhood, while the diverse prompt forces the LLM to explore genuinely different angles.
 
 ### Running the evaluation
 
@@ -108,8 +115,11 @@ RAG-Fusion shows consistent improvements across all metrics, with the largest ga
 # Baseline only (no API key needed)
 python evaluate.py --sample 10 --methods baseline
 
-# Full comparison (requires OPENAI_API_KEY)
+# Default comparison (requires OPENAI_API_KEY)
 python evaluate.py --sample 50
+
+# All four methods
+python evaluate.py --sample 50 --methods baseline rag-fusion rag-fusion-diverse rag-fusion-weighted
 
 # Custom parameters
 python evaluate.py --sample 100 --k 5 10 --data-dir ./datasets

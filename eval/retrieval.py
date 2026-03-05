@@ -17,6 +17,29 @@ def rag_fusion_retrieve(query, collection, k=10):
     return list(fused.keys())[:k]
 
 
+def rag_fusion_diverse_retrieve(query, collection, k=10):
+    """RAG-Fusion with diverse query generation prompt."""
+    generated_queries = generate_queries_chatgpt(query, diverse=True)
+    all_results = {}
+    all_results[query] = vector_search(query, collection, n_results=k)
+    for q in generated_queries:
+        all_results[q] = vector_search(q, collection, n_results=k)
+    fused = reciprocal_rank_fusion(all_results, verbose=False)
+    return list(fused.keys())[:k]
+
+
+def rag_fusion_weighted_retrieve(query, collection, k=10):
+    """RAG-Fusion with diverse queries + 3x weight on original query."""
+    generated_queries = generate_queries_chatgpt(query, diverse=True)
+    all_results = {}
+    all_results[query] = vector_search(query, collection, n_results=k)
+    for q in generated_queries:
+        all_results[q] = vector_search(q, collection, n_results=k)
+    query_weights = {query: 3.0}
+    fused = reciprocal_rank_fusion(all_results, verbose=False, query_weights=query_weights)
+    return list(fused.keys())[:k]
+
+
 def run_evaluation(query_ids, queries, qrels, collection, method_fn, k_values):
     max_k = max(k_values)
     results = {}
