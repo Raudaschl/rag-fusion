@@ -54,7 +54,7 @@ For the full story behind the approach, see the article: [Forget RAG, the Future
 ├── eval/
 │   ├── dataset.py       # NFCorpus download & loading
 │   ├── metrics.py       # IR metrics (Precision, Recall, NDCG, MRR)
-│   └── retrieval.py     # Baseline & RAG-Fusion retrieval wrappers
+│   └── retrieval.py     # Retrieval methods (BM25, vector, hybrid, RAG-Fusion variants)
 └── .env.example         # Environment template
 ```
 
@@ -62,7 +62,7 @@ For the full story behind the approach, see the article: [Forget RAG, the Future
 
 1. Install dependencies:
    ```bash
-   pip install openai chromadb python-dotenv tqdm tabulate
+   pip install openai chromadb python-dotenv tqdm tabulate rank_bm25
    ```
 
 2. Set up your OpenAI API key:
@@ -83,31 +83,33 @@ For the full story behind the approach, see the article: [Forget RAG, the Future
 
 ## Evaluation
 
-To move beyond toy examples, the repo includes a quantitative evaluation harness that compares single-query baseline retrieval against RAG-Fusion on a real dataset. It uses [NFCorpus](https://www.cl.uni-heidelberg.de/statnlpgroup/nfcorpus/) (3,633 medical/nutrition documents, 323 test queries with graded relevance judgments) from the [BEIR benchmark](https://github.com/beir-cellar/beir).
+To move beyond toy examples, the repo includes a quantitative evaluation harness that compares multiple retrieval strategies on a real dataset. It uses [NFCorpus](https://www.cl.uni-heidelberg.de/statnlpgroup/nfcorpus/) (3,633 medical/nutrition documents, 323 test queries with graded relevance judgments) from the [BEIR benchmark](https://github.com/beir-cellar/beir).
 
 ### Results (50 queries, seed=42)
 
-| Metric    | k  | Baseline | RAG-Fusion | +Diverse | +Diverse+Weighted |
-|-----------|----|----------|------------|----------|-------------------|
-| Precision | 5  | 0.272    | 0.276      | **0.276**| 0.272             |
-| Precision | 10 | 0.226    | 0.226      | **0.244**| 0.242             |
-| Precision | 20 | 0.182    | 0.194      | **0.207**| 0.191             |
-| Recall    | 5  | 0.130    | 0.118      | **0.142**| 0.126             |
-| Recall    | 10 | 0.153    | 0.185      | **0.176**| 0.184             |
-| Recall    | 20 | 0.205    | 0.231      | **0.221**| 0.210             |
-| NDCG      | 5  | 0.329    | 0.325      | **0.344**| 0.330             |
-| NDCG      | 10 | 0.309    | 0.312      | **0.333**| 0.327             |
-| NDCG      | 20 | 0.301    | 0.311      | **0.328**| 0.312             |
-| MRR       | -  | 0.460    | 0.443      | **0.470**| 0.461             |
+| Metric    | k  | BM25  | Baseline | Hybrid | RAG-Fusion | +Diverse | Hybrid+Diverse | vs Baseline |
+|-----------|----|-------|----------|--------|------------|----------|----------------|-------------|
+| Precision | 5  | 0.264 | 0.272    | 0.264  | 0.276      | 0.288    | **0.312**      | +14.7%      |
+| Precision | 10 | 0.202 | 0.226    | 0.228  | 0.226      | 0.242    | **0.254**      | +12.4%      |
+| Precision | 20 | 0.146 | 0.183    | 0.175  | 0.194      | 0.197    | **0.203**      | +10.9%      |
+| Recall    | 5  | 0.135 | 0.130    | 0.126  | 0.118      | 0.145    | **0.169**      | +30.0%      |
+| Recall    | 10 | 0.156 | 0.153    | 0.164  | 0.185      | 0.182    | **0.214**      | +39.9%      |
+| Recall    | 20 | 0.172 | 0.205    | 0.192  | 0.231      | 0.225    | **0.249**      | +21.5%      |
+| NDCG      | 5  | 0.337 | 0.329    | 0.341  | 0.325      | 0.359    | **0.402**      | +22.2%      |
+| NDCG      | 10 | 0.304 | 0.309    | 0.326  | 0.312      | 0.341    | **0.381**      | +23.3%      |
+| NDCG      | 20 | 0.276 | 0.302    | 0.304  | 0.311      | 0.330    | **0.364**      | +20.5%      |
+| MRR       | -  | 0.463 | 0.461    | 0.500  | 0.443      | 0.481    | **0.578**      | +25.4%      |
 
-Four methods are compared:
+Six methods are compared:
 
-- **Baseline** — single vector search with the original query.
+- **BM25** — classic keyword search using BM25Okapi. Competitive on NDCG@5 thanks to exact term matching on NFCorpus's medical vocabulary, but falls behind at higher k values where semantic understanding matters more.
+- **Baseline** — single vector search with the original query using ChromaDB's default embedding model (`all-MiniLM-L6-v2`).
+- **Hybrid** — BM25 + vector search fused via RRF (no LLM calls). A strong "free lunch" — runs as fast as baseline with no API costs, and notably improves MRR.
 - **RAG-Fusion** — original + 4 LLM-generated queries, combined via Reciprocal Rank Fusion.
-- **+Diverse** — same as RAG-Fusion but with a prompt that explicitly asks for different angles, synonyms, and varied specificity. Best overall performer.
-- **+Diverse+Weighted** — diverse queries + 3× RRF weight on the original query. The extra weight narrows the net and pulls numbers back toward baseline.
+- **RAG-Fusion +Diverse** — RAG-Fusion with an improved prompt that explicitly asks for different angles, synonyms, and varied specificity. Improves recall and NDCG over standard RAG-Fusion.
+- **Hybrid+Diverse** — the best of both: runs RAG-Fusion (diverse prompt) but searches each query with both BM25 and vector search, then fuses all results via RRF. Best overall performer with **+22% NDCG@5**, **+40% recall@10**, and **+25% MRR** over baseline.
 
-The **diverse prompt** is the biggest win — it consistently outperforms both baseline and standard RAG-Fusion across precision, NDCG, and MRR. The key insight is that the default prompt produces semantically close query variations that search the same embedding neighborhood, while the diverse prompt forces the LLM to explore genuinely different angles.
+Three key insights emerge. First, **hybrid search is a free lunch** — fusing BM25 and vector results via RRF costs nothing extra and improves ranking quality, especially MRR. Second, the **diverse prompt** outperforms standard RAG-Fusion by forcing the LLM to explore genuinely different angles rather than generating semantically close variations. Third, **the two techniques are fully complementary** — hybrid's keyword precision and diverse's semantic breadth combine cleanly through RRF, producing the strongest results across every metric.
 
 ### Running the evaluation
 
@@ -118,8 +120,8 @@ python evaluate.py --sample 10 --methods baseline
 # Default comparison (requires OPENAI_API_KEY)
 python evaluate.py --sample 50
 
-# All four methods
-python evaluate.py --sample 50 --methods baseline rag-fusion rag-fusion-diverse rag-fusion-weighted
+# All methods
+python evaluate.py --sample 50 --methods bm25 baseline hybrid rag-fusion rag-fusion-diverse hybrid-diverse
 
 # Custom parameters
 python evaluate.py --sample 100 --k 5 10 --data-dir ./datasets

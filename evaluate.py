@@ -7,8 +7,9 @@ from tabulate import tabulate
 
 from eval.dataset import download_nfcorpus, load_nfcorpus, load_into_chromadb, sample_queries
 from eval.retrieval import (
-    single_query_retrieve, rag_fusion_retrieve,
-    rag_fusion_diverse_retrieve, rag_fusion_weighted_retrieve, run_evaluation,
+    bm25_retrieve, single_query_retrieve, hybrid_retrieve, rag_fusion_retrieve,
+    rag_fusion_diverse_retrieve, rag_fusion_weighted_retrieve,
+    hybrid_diverse_retrieve, run_evaluation,
 )
 
 
@@ -96,7 +97,8 @@ def main():
                         help="k values for evaluation; each must be > 0 (default: 5 10 20)")
     parser.add_argument("--data-dir", type=str, default="./datasets", help="Data directory (default: ./datasets)")
     parser.add_argument("--methods", type=str, nargs="+", default=["baseline", "rag-fusion"],
-                        choices=["baseline", "rag-fusion", "rag-fusion-diverse", "rag-fusion-weighted"],
+                        choices=["bm25", "baseline", "hybrid", "rag-fusion", "rag-fusion-diverse",
+                                 "rag-fusion-weighted", "hybrid-diverse"],
                         help="Methods to evaluate (default: baseline rag-fusion)")
     args = parser.parse_args()
 
@@ -113,10 +115,13 @@ def main():
     print(f"\nSampled {len(query_ids)} queries for evaluation.\n")
 
     method_registry = {
+        "bm25": ("BM25", bm25_retrieve, False),
         "baseline": ("Baseline", single_query_retrieve, False),
+        "hybrid": ("Hybrid", hybrid_retrieve, False),
         "rag-fusion": ("RAG-Fusion", rag_fusion_retrieve, True),
         "rag-fusion-diverse": ("+Diverse", rag_fusion_diverse_retrieve, True),
         "rag-fusion-weighted": ("+Diverse+Weighted", rag_fusion_weighted_retrieve, True),
+        "hybrid-diverse": ("Hybrid+Diverse", hybrid_diverse_retrieve, True),
     }
 
     all_metrics = {}
