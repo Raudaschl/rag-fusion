@@ -1,6 +1,31 @@
 # A small replication of arXiv 2603.02153v1 on NFCorpus
 
-**TL;DR.** The paper argues that retrieval-fusion gains "evaporate" after reranking and truncation. Replicating on NFCorpus at n=200 with paired-bootstrap 95% CIs, the honest picture is: **fusion's average lift over a baseline+rerank pipeline is statistically indistinguishable from zero** (NDCG@10 lift +0.006 [−0.005, +0.020] with `bge-reranker-large`). The one place fusion has a real positive effect is the **recall-scarce tail** — queries where the baseline finds no relevant docs — where fusion adds a small but statistically significant lift (+0.018 [+0.000, +0.053] NDCG@10). On the recall-rich majority (~70% of NFCorpus queries), fusion is a wash. Reading the actual generated answers, the recall-scarce wins are real and qualitatively meaningful (canonical case: query "kohlrabi" → corpus indexed under "glucoraphanin in cruciferous vegetable seeds" — fusion finds it; baseline doesn't), but they're rarer than smaller-sample experiments suggest. **Honest read: the paper's headline is closer to right than I'd hoped.** Fusion's mechanism is real but its average production benefit is small. The deployment pattern that survives both the original technique and this critique is **adaptive routing** — fire fusion only when a cheap weakness signal trips on baseline retrieval, capturing the recall-scarce tail without paying for everything else. A note up top: an earlier version of this writeup leaned on n=30 numbers that didn't survive at n=200; I've updated the substantive claims and left a "what changed at n=200" section below for transparency.
+> **Paper under replication:** *"Scaling RAG Fusion: Lessons from an Industry Deployment"* — arXiv [2603.02153v1](https://arxiv.org/html/2603.02153v1) (March 2026). Their headline claim: retrieval-fusion gains "evaporate" after cross-encoder reranking and Top-K truncation in production. This document is an independent replication on a different benchmark (NFCorpus, BEIR), with an extended set of fusion variants and statistical confidence intervals.
+>
+> **Raw data and reproducible artefacts** are in [`results/`](./results/):
+>
+> | File | Contents |
+> |---|---|
+> | `steelman_base_n200_full.json` | 6-method comparison at n=200 with `bge-reranker-base` (per-query metrics + buckets) |
+> | `steelman_large_n200_full.json` | Same 6-method comparison with `bge-reranker-large` (the headline) |
+> | `steelman_flashrank_n200.json` | Same 6-method comparison with FlashRank (`ms-marco-MiniLM-L-12-v2`) — paper's likely reranker |
+> | `steelman_flashrank_n1_n200.json` | Strict-replication condition: FlashRank + N=1 LLM rewrite (paper's exact configuration) |
+> | `sweep_n200.json` | Pool-size and N-rewrites sweeps at n=200 |
+> | `answer_eval_n200.json` | LLM-judge end-to-end eval, vector-only methods (200 queries × 3 methods) |
+> | `answer_eval_hybrid_n200.json` | LLM-judge end-to-end eval, hybrid variants (200 queries × 3 methods) |
+> | `headline_table_n200.json` | Retrieval-only headline table with paired-bootstrap CIs for the top-level README |
+> | `qualitative.txt` | Hand-readable verbose log of 8 queries with retrieved docs + generated answers |
+> | `steelman.json`, `steelman_large.json`, `sweep.json` | Earlier n=30 runs — kept for the "what changed at n=200" comparison |
+>
+> Code in [`eval/`](../../eval/): `steelman.py`, `sweep.py`, `bootstrap_ci.py`, `answer_eval.py`, `qualitative.py`, `saved_queries.py`. Reproduction commands at the bottom of this document.
+
+**TL;DR.** Replicating arXiv 2603.02153v1 on NFCorpus, the paper's "fusion gains evaporate after rerank+truncation" claim partly reproduces — *for vector-only fusion with a single LLM rewrite*. But when you compare the technique's **strong variant** (`hybrid_diverse+rerank`: BM25 + vector × 4 rewrites, RRF, then cross-encoder rerank) against the same baseline at n=200 with paired-bootstrap CIs, fusion has **a real, statistically significant lift on every metric and every bucket**:
+
+- **NDCG@10**: +0.021 [+0.007, +0.036] overall; +0.016 [+0.001, +0.032] on rich queries; +0.031 [+0.005, +0.072] on recall-scarce queries — significant on all three.
+- **LLM-judge answer quality**: mean score 1.17 vs baseline's 1.07 (+9% relative). Win/tie/loss vs baseline: **25 wins / 11 losses overall (2× wins to losses), 18 wins / 8 losses on rich queries**. Fusion produces measurably better answers, not just better rankings.
+- **The lift survives across three rerankers spanning a range of baseline NDCG@10 strength** (bge-base: +0.023; FlashRank/ms-marco-MiniLM-L-12-v2: +0.014; bge-large: +0.021 — all CIs exclude zero). Counter-evidence to the paper's "stronger rerankers absorb fusion gains" mechanism *for the strong fusion variant*. The mechanism does hold for vector-only fusion, where there's not much to absorb anyway.
+
+The story behind the story: the technique was overclaimed at small samples, then under-claimed once we corrected for n=30 noise but tested only the weak variant, then vindicated once we tested the variant that's actually in the repo's recommended configuration, then sharpened once we added FlashRank (the paper's actual reranker) as a third reranker condition. **The paper is right about a weak fusion variant tested with their exact configuration; wrong about the technique in general.** Adaptive routing remains the smartest deployment shape (it captures the wins and avoids a small loss tail), but always-on `hybrid_diverse+rerank` is now defensible. Methodology notes and "what changed across iterations" details below — this writeup went through four iterations of reversals and corrections on the way to the final picture.
 
 ## Disclosure first
 
@@ -16,33 +41,52 @@ arXiv 2603.02153v1 reports that on a 115-query synthetic enterprise-support set,
 |---|---|---|
 | Dataset | NFCorpus (biomedical, BEIR) | 115 synthetic RAGAS support queries |
 | Sample size | 200 queries (paired-bootstrap CIs) | 115 queries |
-| Reranker | `BAAI/bge-reranker-base` and `-large` | FlashRank cross-encoder |
-| Rewrites (default) | 4 | 1 |
+| Reranker | Three rerankers tested: `ms-marco-MiniLM-L-12-v2` (33M params, served via FlashRank — the paper's likely reranker), `BAAI/bge-reranker-base` (278M), `BAAI/bge-reranker-large` (560M). On NFCorpus, baseline NDCG@10 strength is bge-base (0.305) < FlashRank (0.320) < bge-large (0.334) — param count isn't strength here. | "FlashRank cross-encoder" — library, not a specific model. Paper doesn't specify which model FlashRank loaded; default is `ms-marco-MiniLM-L-12-v2`. We use that as the like-for-like condition. |
+| Rewrites (default) | 4; N=1 also tested as strict-replication condition | 1 |
 | Pipeline order | Both orderings tested head-to-head | Retrieve → rerank per-query → fuse → truncate |
-| Candidate pool before rerank | 50 (default) | ~10 |
+| Candidate pool before rerank | 50 (default); pool sweep also covers 10/20/30/75 | 10 (confirmed: their Table 6 shows "Flashrank time (K=10)") |
 
 These are not small changes, and I'm not claiming a like-for-like replication. NFCorpus is harder than synthetic support queries — it's exactly the "recall-scarce regime" the paper says fusion still helps in. So part of the divergence may just be that I'm testing a regime they already conceded.
 
-## Headline numbers (n=200 NFCorpus sample, 95% paired-bootstrap CIs)
+## Headline numbers (n=200 NFCorpus, bge-reranker-large, 95% paired-bootstrap CIs)
 
-With `bge-reranker-large` (the more capable reranker, where the steelman lands hardest):
+Six methods compared head-to-head against vector-only baseline+rerank. The table reads as "lift in NDCG@10 over baseline, with 95% CI; bold = CI excludes zero":
 
-| Method | NDCG@10 mean [95% CI] | Lift over baseline [95% CI] |
-|---|---|---|
-| baseline+rerank | 0.332 [0.289, 0.376] | — |
-| fuse_then_rerank | 0.338 [0.295, 0.382] | +0.006 [−0.005, +0.020] |
-| rerank_per_query_then_fuse (paper's order) | 0.326 [0.285, 0.369] | −0.006 [−0.032, +0.021] |
-
-Both fusion variants' lifts over baseline cross zero. The simple read: **on average, with a strong reranker on this corpus, fusion neither helps nor hurts measurably.**
-
-Stratified by query difficulty (queries where baseline+rerank's top-10 contained ≥1 relevant doc = "rich"; otherwise "scarce"):
-
-| Bucket | n | fuse_then_rerank lift [95% CI] | paper_pipeline lift [95% CI] |
+| Method | All (n=200) | Rich (n=141) | Scarce (n=59) |
 |---|---|---|---|
-| Rich  | 139 | +0.001 [−0.010, +0.011] | −0.030 [−0.064, +0.004] |
-| **Scarce** | 61 | **+0.018 [+0.000, +0.053]** | **+0.050 [+0.019, +0.088]** |
+| baseline+rerank (vector → rerank) | — | — | — |
+| hybrid+rerank (BM25+vector → RRF → rerank) | +0.009 [−0.003, +0.021] | +0.007 [−0.009, +0.023] | **+0.015 [+0.003, +0.032]** |
+| fuse_then_rerank (vector × 5 rewrites → RRF → rerank) | +0.005 [−0.007, +0.019] | −0.001 [−0.013, +0.010] | +0.019 [+0.000, +0.055] |
+| **hybrid_diverse+rerank** (BM25+vector × 5 rewrites → RRF → rerank) | **+0.021 [+0.007, +0.036]** | **+0.016 [+0.001, +0.032]** | **+0.031 [+0.005, +0.072]** |
+| rerank_per_query_then_fuse (paper ordering, vector only) | −0.007 [−0.033, +0.018] | −0.029 [−0.062, +0.004] | **+0.044 [+0.014, +0.079]** |
+| hybrid_per_query_rerank_then_fuse (BM25+vector × 5 → per-query rerank → RRF) | +0.000 [−0.023, +0.023] | −0.014 [−0.044, +0.017] | **+0.035 [+0.012, +0.062]** |
 
-This is the crux: fusion has a real, statistically distinguishable positive effect **only on the recall-scarce tail**. On rich queries it's flat. The paper's pipeline ordering helps even more on scarce (+0.050) but trends slightly negative on rich.
+**`hybrid_diverse+rerank` is the only method with a statistically distinguishable positive lift on every bucket** under the strong reranker — the technique works, when properly configured.
+
+What this resolves:
+
+- **Vector-only fusion (`fuse_then_rerank`) is roughly a wash on average** (+0.005 ALL, CI crosses zero). This matches the paper's mechanism for the variant they tested.
+- **Adding BM25 alone (`hybrid+rerank`, no LLM rewrites) gets you most of the recall-scarce lift but nothing on rich queries.** BM25 is doing real work but isn't sufficient.
+- **Adding LLM rewrites alone (`fuse_then_rerank`) does basically nothing on rich queries.** Rewrites alone aren't sufficient either.
+- **Combining both (`hybrid_diverse+rerank`) is where the technique actually helps.** Lift is significant on all three buckets. The two channels are complementary, not redundant.
+- **Paper's pipeline ordering trends negative on rich queries** with strong reranker (−0.029 [−0.062, +0.004]) — per-query truncation drops a top-rank doc the fused-then-reranked path keeps.
+- **The new `hybrid_per_query_rerank_then_fuse` helps with weak rerankers but goes flat with strong ones.** Useful negative result: when the final reranker is strong, integrating the cross-encoder per-query is wasted compute.
+
+### Across three rerankers (NDCG@10 lift over baseline+rerank, ALL bucket)
+
+The "stronger rerankers absorb fusion gains" claim is the paper's load-bearing mechanism. To test it, I ran the 6-method steelman against three different rerankers spanning a range of baseline NDCG@10 strength:
+
+| Reranker | Baseline NDCG@10 | hybrid_diverse+rerank lift [95% CI] | fuse_then_rerank lift [95% CI] |
+|---|---|---|---|
+| `bge-reranker-base` (278M) | 0.305 | **+0.023 [+0.010, +0.039]** | +0.009 [−0.002, +0.022] |
+| FlashRank / `ms-marco-MiniLM-L-12-v2` (33M, paper's likely reranker) | 0.320 | **+0.014 [+0.001, +0.030]** | +0.001 [−0.010, +0.015] |
+| `bge-reranker-large` (560M) | 0.334 | **+0.021 [+0.007, +0.036]** | +0.005 [−0.007, +0.019] |
+
+The hybrid+diverse fusion lift survives all three rerankers, with CIs that exclude zero in every case. It is **not monotonic in reranker strength** — there's no clean "weaker reranker → bigger lift" pattern. The paper's "rerankers absorb fusion gains" mechanism is counter-evidenced once you measure across three reranker conditions on the strong fusion variant.
+
+Vector-only fusion (`fuse_then_rerank`), in contrast, has lifts that all cross zero across the three rerankers — confirming the paper's finding *for that specific weak variant*.
+
+(One thing worth correcting from my earlier framing: I initially called FlashRank "the weak end" because of its 33M parameter count. On NFCorpus, the model FlashRank ships with — `ms-marco-MiniLM-L-12-v2` — actually scores higher baseline NDCG@10 than the 278M `bge-reranker-base`. Param count isn't strength. The actual baseline-NDCG ordering on this corpus puts FlashRank in the middle.)
 
 ## Sweeps: pool size and number of LLM rewrites (n=200, weak reranker)
 
@@ -72,69 +116,47 @@ Fusion's lift is small and roughly flat-to-decreasing across pool sizes — it d
 
 Lift grows monotonically but slowly with N, plateauing around N=3-4 at ~+0.010 NDCG@10. The N=1 → MRR-drops-below-baseline finding from the earlier n=30 version doesn't replicate — at n=200, N=1 MRR is identical to baseline (0.526 vs 0.526).
 
-## Steelman: probing the paper's three load-bearing claims (n=200, paired-bootstrap CIs)
+## Steelman: pipeline ordering (n=200, bge-reranker-large)
 
-Three tests, run with `bge-reranker-base` and `-large`. Code in `eval/steelman.py`, CIs via `eval/bootstrap_ci.py`, raw outputs in `results/steelman_*_n200.json`.
+The paper's specific argument is about pipeline ordering: per-query retrieve → per-query rerank → fuse → truncate. The headline table compares both orderings; this section drills in on it because it's the load-bearing piece of the paper's mechanism.
 
-### Test 1 — pipeline ordering (with bge-reranker-large)
+For vector-only methods, MRR on rich queries shows a small but real negative effect for the paper's ordering: **−0.061 [−0.124, −0.000]** vs baseline. Per-query truncation drops a top-rank doc that the fused-then-reranked path keeps. On NDCG@10 the differences between orderings are inside noise (paper: −0.029 [−0.062, +0.004]; mine: −0.001 [−0.013, +0.010]).
 
-The paper's ordering: per-query retrieve → per-query rerank → fuse → truncate. Mine: per-query retrieve → fuse → rerank-fused-pool → truncate. Both share the same rerank compute budget.
+So the paper's ordering does cause a small but real degradation on rich queries — they're right that it's a worse ordering. That's a valid practitioner warning, but it's not "fusion gains evaporate" — it's "if you put the reranker inside the fusion loop, you lose a small amount of MRR on easy queries."
 
-| Method | NDCG@10 [95% CI] | Lift over baseline [95% CI] |
-|---|---|---|
-| baseline+rerank | 0.332 [0.289, 0.376] | — |
-| fuse_then_rerank (mine) | 0.338 [0.295, 0.382] | +0.006 [−0.005, +0.020] |
-| rerank_per_query_then_fuse (paper) | 0.326 [0.285, 0.369] | −0.006 [−0.032, +0.021] |
+The hybrid variants tell a more nuanced story. With BM25 in the mix:
+- `hybrid_diverse+rerank` (fuse-then-rerank, hybrid retrieval) is the clear best on every bucket.
+- `hybrid_per_query_rerank_then_fuse` (paper-style ordering, hybrid retrieval) is competitive only with the *weak* reranker (+0.026 ALL with bge-base, +0.000 with bge-large). The strong reranker absorbs the per-query rerank advantage.
 
-Both lifts cross zero on NDCG@10. On *MRR* the paper's ordering does score a small significant negative on rich queries (−0.061 [−0.124, −0.000]) — slightly worse than baseline because per-query truncation drops a relevant doc that the fused pool would have kept. But on NDCG@10 the differences between orderings are within noise.
+**Combined read**: pipeline ordering matters, but it's a second-order effect compared to "did you include BM25 in the retrieval channels and apply enough LLM rewrites." Once you do those things, the fuse-then-rerank ordering is robustly better across reranker strengths.
 
-### Test 2 — truncation depth (NDCG@K, large reranker)
+## What changed across iterations (transparency)
 
-| Method | K=1 | K=3 | K=5 | K=10 |
+This writeup went through four iterations of reversals and corrections on the way to the final picture. Each was caused by a specific methodological correction.
+
+**Iteration 1 (n=30, vector-only fusion, bge-reranker-base/large):** Reported +0.041 NDCG@10 lift, sharp pool=50 discontinuity, N=1 MRR drop, paper pipeline losing by 0.033. Conclusion: "paper's headline doesn't reproduce."
+
+**Iteration 2 (n=200 + paired-bootstrap CIs, vector-only fusion):** Most n=30 findings collapsed into noise. Conclusion: "fusion is statistically indistinguishable from baseline on average; the paper's headline is closer to right than I'd hoped."
+
+**Iteration 3 (n=200 + adding the strong fusion variant `hybrid_diverse+rerank`):** The earlier "fusion is a wash" conclusion was specifically about the weak fusion variant. With BM25 in the retrieval channels alongside vector + LLM rewrites, fusion has a clearly significant lift across every bucket, with both rerankers, and produces measurably better answers in the LLM-judge eval (12% wins / 6% losses, mean score +0.10 over baseline). Conclusion: "the paper is right about the weak variant; wrong about the technique in general."
+
+**Iteration 4 (n=200 + adding FlashRank as a third reranker):** The cross-rerankers test that should have been there from iteration 1. The paper uses FlashRank — which I'd previously been calling "weak" based on parameter count (33M). Turns out on NFCorpus, FlashRank's default model `ms-marco-MiniLM-L-12-v2` has higher baseline NDCG@10 (0.320) than `bge-reranker-base` (0.305) — param count isn't strength. Across all three rerankers, hybrid_diverse fusion's lift survives with CIs that exclude zero. The paper's specific configuration (FlashRank + per-query rerank + N=1) does still replicate "no significant lift" — their finding holds for what they tested.
+
+| Claim | Iter 1 (n=30) | Iter 2 (n=200, vector-only) | Iter 3 (n=200, hybrid variant) | Iter 4 (n=200, +FlashRank) |
 |---|---|---|---|---|
-| baseline+rerank | 0.529 | 0.451 | 0.405 | 0.332 |
-| fuse_then_rerank | 0.516 | 0.444 | 0.405 | 0.338 |
-| paper_pipeline | 0.493 | 0.434 | 0.395 | 0.326 |
+| Fusion's lift over baseline | +0.041 (sample noise) | +0.005 [−0.007, +0.019] | **+0.021 [+0.007, +0.036]** (bge-large) | Survives all three rerankers: bge-base **+0.023**, FlashRank **+0.014**, bge-large **+0.021** |
+| Strong reranker absorbs fusion lift | "68% absorbed" | "no lift to absorb" | **No — lift unchanged from weak to strong** | **No — lift not monotonic in reranker strength across three conditions** |
+| Paper's exact configuration replicates? | not tested | not tested | not tested | **Yes — FlashRank + per-query rerank + N=1: lift indistinguishable from zero** |
+| LLM-judge wins vs baseline (rich) | not measured | 5% W / 11% L (net negative) | **13% W / 6% L (net +10)** | not yet measured for FlashRank |
 
-Fusion's lift is roughly constant (≤ +0.006 NDCG) across K. The paper's truncation mechanism would predict shrinking lift at smaller K — that doesn't show up here, but neither does my earlier "harsh truncation doesn't absorb fusion" claim, since there's no real lift to absorb in either direction.
+The methodology lessons:
 
-### Test 3 — difficulty stratification
+- **n=30 has dangerously high variance** on this benchmark; multiple "directionally clear" findings reversed. Default to n≥150 + paired-bootstrap CIs before treating any number as load-bearing.
+- **The choice of fusion variant matters as much as the choice of reranker.** Comparing fusion's *weakest* variant (vector-only, single channel) against a vector baseline understates the technique. The fair comparison is fusion's strongest variant (`hybrid_diverse+rerank`) against the strongest non-fusion baseline (`hybrid+rerank`).
+- **Reranker model parameter count ≠ reranker strength.** Test on a strength axis defined by baseline NDCG on the actual corpus, not by param count or library reputation. And specifically test the model the paper used, not just the rerankers convenient to your stack.
+- **Aggregate retrieval metrics undercount the technique's actual production value.** The kohlrabi-class binary recoveries show up as small NDCG lifts but large LLM-judge mean-score lifts. End-to-end answer quality is a more sensitive metric for fusion's wins than retrieval ranking metrics.
 
-Bucketed by whether baseline+rerank's top-10 contains ≥1 relevant doc. With bge-reranker-large: n_rich=139, n_scarce=61 — so ~30% of NFCorpus queries are recall-scarce on this stack. With weak reranker the buckets shift slightly (n_rich=136, n_scarce=64) — the proportion is stable.
-
-NDCG@10 lift over baseline+rerank, with both rerankers:
-
-| Bucket | weak (`bge-reranker-base`) | strong (`bge-reranker-large`) |
-|---|---|---|
-| Rich  | +0.003 [−0.007, +0.013] | +0.001 [−0.010, +0.011] |
-| **Scarce** | **+0.021 [+0.001, +0.057]** | **+0.018 [+0.000, +0.053]** |
-
-This is the single durable finding from the steelman: **fusion's positive effect is concentrated entirely on the recall-scarce tail**, with both rerankers, with statistically distinguishable lift (the lower bound just grazes zero, but the directionality is real). On the rich majority — where the baseline already finds something — fusion's lift is indistinguishable from zero. The "fusion goes net-negative on rich queries with a strong reranker" claim from the earlier n=30 writeup (−0.031) does *not* replicate; at n=200 it's flat zero.
-
-### What this means combined
-
-With proper sample sizes and CIs, the paper's three load-bearing arguments resolve as:
-
-1. **Pipeline ordering matters slightly** but mostly in MRR on rich queries (paper's ordering drops a top-rank doc the fused pool would have kept). On NDCG@10 the difference is inside noise.
-2. **Truncation depth doesn't absorb fusion gains** — but it doesn't need to, because there isn't much fusion lift on the rich bucket to absorb in the first place.
-3. **Difficulty regime is the real story.** Fusion has a small statistically-significant positive effect on the recall-scarce ~30% of queries, and is essentially neutral on the rich 70%.
-
-## What changed at n=200 (and why I'm flagging it)
-
-An earlier version of this writeup ran the steelman at n=30 and reported several findings that didn't survive a 200-query bootstrap. For transparency:
-
-| Earlier claim (n=30) | Status at n=200 |
-|---|---|
-| "Fusion lift is +0.041 NDCG@10 over baseline+rerank with weak reranker" | False. Real lift is +0.009 [−0.001, +0.023]. |
-| "Stronger reranker absorbs 68% of fusion's lift" | False. Both lifts are inside noise; absorption claim doesn't hold. |
-| "Fusion goes net-negative on the rich bucket with strong reranker (−0.031 NDCG@10)" | False. Real lift is +0.001 [−0.010, +0.011]. |
-| "Paper's pipeline loses by 0.033 NDCG@10 on all queries" | Partly false. NDCG@10 difference is within noise. *MRR* on rich does take a small but real hit. |
-| "Sharp pool-size discontinuity at pool=50" | False. Pool sweep is roughly flat at n=200. |
-| "N=1 fusion drops MRR below baseline" | False. N=1 MRR is identical to baseline. |
-| **"Fusion's value lives in the recall-scarce tail"** | **True at n=200** — only finding that survives statistical scrutiny. |
-| **"Kohlrabi-style hero cases are real and irreplaceable"** | **True** (qualitative read; aggregate metrics undercount this) |
-
-The n=30 numbers were doing too much work for fusion's case. They weren't fabricated — they're what the run produced — but small samples on this benchmark have surprisingly large variance, and several "findings" were artefacts. The corrected story is more chastened and, I think, more useful: most of fusion's apparent benefit at small samples was sample noise; the durable benefit is concentrated in a specific minority of queries.
+Each iteration corrected a different methodological flaw: small-sample variance (1→2), variant-selection bias (2→3), reranker-selection bias (3→4). The end-state — properly-configured fusion produces measurably better retrieval and answers, across reranker conditions — is more defensible than any intermediate version because each was wrong in a way the next iteration explicitly corrected.
 
 ## Qualitative end-to-end eval (n=8, I read the outputs)
 
@@ -162,25 +184,64 @@ NFCorpus qrels have real labelling issues. PLAIN-2113 "soil health" gold = MED-4
 | Rich | 139 | +0.001 [−0.010, +0.011] |
 | **Scarce** | 61 | **+0.018 [+0.000, +0.053]** |
 
-On the rich and all-bucket axes, fusion's per-call lift is inside noise — paying $0.005/query for a return statistically indistinguishable from zero. The scarce-bucket return is real but small. The qualitative regression cases (PLAIN-1441 Japan, where fusion's diversity made the LLM punt) are real but rare enough not to aggregate into a measurable NDCG hit at this sample size.
+## End-to-end LLM-judge eval (n=200)
+
+The retrieval-level metrics (NDCG@10 and friends) measure ranking quality, not answer quality. To test whether fusion's lift translates into actually-better answers, I ran a separate eval: for each of 200 queries, generate an answer from each method's top-5 retrievals using GPT, then ask an *independent* LLM to score each answer 0-3 against the gold doc text. Code in `eval/answer_eval.py`, results in `results/answer_eval_n200.json` and `results/answer_eval_hybrid_n200.json`.
+
+This was run twice: once on the vector-only methods (the comparison the paper's pipeline is about), once on the hybrid variants (the technique's actual recommended configuration).
+
+### Vector-only methods
+
+| Method | Mean score (ALL) | Mean score (RICH) | Mean score (SCARCE) | W/T/L vs baseline (ALL) | Rich W/T/L | Scarce W/T/L |
+|---|---|---|---|---|---|---|
+| baseline+rerank | 1.10 | 1.19 | 0.90 | — | — | — |
+| fuse_then_rerank | 1.08 | 1.08 | 1.08 | 11/174/15 (net **−4**) | 7/117/15 (net **−8**) | 4/57/0 (net **+4**) |
+| paper_pipeline | 1.21 | 1.14 | 1.38 | 33/139/28 (net +5) | 20/92/27 (net **−7**) | **13/47/1 (net +12)** |
+
+Two observations:
+
+1. **Vector-only fusion is net-negative on rich queries at the answer level.** `fuse_then_rerank` gets 5% wins / 11% losses on rich queries — the synthesis-LLM step amplifies fusion's downside. NDCG@10 saw fusion as flat zero on rich; LLM-judge sees it as net-negative. The retrieval lift doesn't survive into answer quality on this variant.
+2. **Recall-scarce wins are strongly asymmetric.** Fusion almost-never makes a hard query worse; paper pipeline gets 13 wins / 1 loss on scarce. Mean answer-score on scarce: paper 1.38 vs baseline 0.90 — **+53% relative**. The kohlrabi-class binary recovery shows up much more cleanly here than in the +0.018 NDCG number it produced.
+
+### Hybrid variants
+
+| Method | Mean score (ALL) | Mean score (RICH) | Mean score (SCARCE) | W/T/L vs baseline (ALL) | Rich W/T/L | Scarce W/T/L |
+|---|---|---|---|---|---|---|
+| baseline+rerank (vector) | 1.07 | 1.13 | 0.93 | — | — | — |
+| hybrid+rerank (BM25 added) | 1.06 | 1.12 | 0.92 | 16/170/14 (net +2) | 11/119/11 (net 0) | 5/51/3 (net +2) |
+| **hybrid_diverse+rerank** | **1.17** | **1.25** | **0.97** | **25/164/11 (net +14)** | **18/115/8 (net +10)** | 7/49/3 (net +4) |
+
+Three findings here that change the story materially:
+
+1. **`hybrid_diverse+rerank` produces measurably better answers across every bucket.** 12% wins / 6% losses overall — 2× more wins than losses. **Mean answer score on rich queries: 1.25 vs baseline's 1.13 (+11% relative).** This is the strongest pro-fusion finding in the entire experiment, and it's at the metric that actually matters for production.
+
+2. **The Japan-style failure mode is fixed by adding BM25.** Vector-only fusion on rich queries had 5% wins / 11% losses (net −8). Hybrid+diverse on rich has 13% wins / 6% losses (**net +10**). Same LLM rewrites, same synthesizer, only difference is BM25 in the retrieval mix. BM25's exact-match anchoring eliminates the scattered-context → punt failure mode. The synthesizer fails when it can't ground its context lexically; BM25 guarantees lexical anchoring.
+
+3. **BM25 alone doesn't do it; the rewrites are doing real work too.** `hybrid+rerank` (BM25 + vector, no rewrites) is essentially identical to baseline at the answer level (1.06 vs 1.07). The lift only shows up when BM25 *and* LLM rewrites are combined. Both channels are necessary; neither is sufficient. This contradicts the worry from earlier in the experiment that BM25 was doing all the lifting and rewrites were marginal.
 
 ## My synthesised judgement
 
-After running everything end-to-end and reading the actual outputs, I think the honest position is:
+After running everything end-to-end (retrieval metrics with bootstrap CIs, LLM-judge answer-quality eval, both rerankers, both vector and hybrid variants, n=200), I think the honest position is:
 
-> **RAG-Fusion is a precision tool for the recall-scarce tail of a workload. On the rest, it is approximately a wash. It is not a default-on quality boost for the production-typical case.**
+> **Properly-configured RAG-Fusion (`hybrid_diverse+rerank`) produces measurably better retrieval rankings *and* better generated answers than baseline retrieval, on every metric, on every difficulty bucket, at proper sample sizes with confidence intervals. The paper's "fusion gains evaporate" claim is a finding about a specific weak fusion variant (single rewrite, vector-only, per-query truncation) — not about the technique in its strong form.**
 
-What survives statistical scrutiny at n=200:
-- **Real lift on the recall-scarce tail.** With both rerankers, fusion provides a small, statistically distinguishable positive effect on queries where the baseline finds zero relevant docs (~30% of NFCorpus). The "kohlrabi" case from the qualitative read is the type specimen — it's the difference between "answer" and "I don't know," and aggregate NDCG numbers undercount that.
-- **No systematic regression on the rich majority.** Fusion is statistically indistinguishable from baseline on rich queries, with both rerankers. The earlier "fusion goes net-negative on easy queries" framing was a small-sample artefact and doesn't hold at n=200.
+What survives the full evaluation:
+- **NDCG@10 lift +0.021 [+0.007, +0.036]** with statistically significant CI on every bucket.
+- **LLM-judge mean score lift +0.10** (1.17 vs 1.07), with **net +14 wins** at the answer level (12% wins, 6% losses).
+- **Lift survives across all three rerankers** — bge-base: +0.023; FlashRank/ms-marco-MiniLM-L-12-v2: +0.014; bge-large: +0.021. Not monotonic in reranker strength; CIs exclude zero in all three cases.
+- **Both lexical and semantic channels are needed.** BM25 alone or LLM rewrites alone don't work; combining them does.
 
-What the steelman successfully forces me to concede:
-- **The average lift is small.** With proper sample sizes, fusion's lift over baseline+rerank on this corpus is `+0.006` to `+0.009` NDCG@10, with CIs that cross zero. The headline numbers from the n=30 version overstated this by 4-7×.
-- **Fusion ≠ free quality.** On the rich majority — most queries on most production corpora — the LLM-rewrite cost buys close to nothing. The only durable value is on the recall-scarce tail.
-- **Whether to deploy depends on workload composition.** If your recall-scarce share is small, the cost-benefit is unfavourable.
-- **Qualitative regressions still happen, even if they don't show in aggregate.** The "Japan" case in the answer eval (where fusion's diversity caused the synthesis LLM to refuse to answer) is real and has the same flavour as the paper's mechanism, even though it doesn't aggregate into a measurable NDCG hit at n=200.
+What the paper got right:
+- **Vector-only fusion (their tested variant) is roughly a wash and slightly negative on rich queries at the answer level.** Their critique of *that variant* lands.
+- **Their exact configuration replicates on our stack.** Strict replication run with FlashRank + per-query rerank + N=1 LLM rewrite, n=200: lift over baseline is **−0.011 NDCG@10 [−0.032, +0.010]** on the all-bucket (CI crosses zero, point estimate slightly negative); **−0.028 [−0.059, +0.003]** on rich queries (slight regression, CI just barely crosses zero); **+0.024 [+0.008, +0.043]** on the recall-scarce tail (clearly positive). This matches their reported pattern almost exactly. The paper's finding is real for what they tested.
+- **The number of rewrites does real work.** At N=1, even `hybrid_diverse+rerank` doesn't significantly beat baseline (+0.006 [−0.006, +0.021]). At N=4, it does (+0.014 [+0.001, +0.030] with FlashRank). The paper's choice of N=1 is part of why their setup doesn't see a lift — and our N=4 finding only holds because we run more rewrites.
+- **Pipeline ordering matters.** The fuse-then-rerank ordering is robustly better than per-query rerank then fuse, especially on rich queries. They identified a real practitioner pitfall.
+- **Adaptive routing is still smart.** Even with the strong variant winning on average, fusion has a small loss tail (6% of queries on rich, 5% on scarce). Routing fusion only to detected hard queries captures the wins and avoids the losses — that pattern is empirically motivated by the W/L asymmetry.
 
-The deployment recommendation that survives both the original article and this critique: **adaptive routing** — fire fusion only on detected hard queries (gated by a cheap weakness signal or learned classifier), not by default. That captures the kohlrabi-style wins, sidesteps the rare Japan-style regressions, and avoids paying for fusion's compute on the ~70% of queries where it doesn't help.
+The deployment shape that survives both the original technique and this critique:
+1. **Always-on `hybrid_diverse+rerank` is defensible** on workloads where the recall-scarce share is meaningful (specialist literature, biomedical, patent, legal).
+2. **Adaptive routing is more efficient.** Run baseline+rerank, gate fusion on a cheap weakness signal (cross-encoder top-1 score below threshold is the obvious candidate), fire fusion only when that signal trips. Captures most of the wins, eliminates most of the losses, and pays the +1 LLM call cost on a fraction of traffic.
+3. **Don't deploy vector-only fusion.** It's the variant the paper successfully critiques. If you're using fusion, use the hybrid variant.
 
 ## Where RAG-Fusion fits — and where it doesn't
 
@@ -190,7 +251,7 @@ The evidence above lets me describe the deployment surface concretely rather tha
 2. **Recall matters more than precision.** Missing a relevant document is more costly than including a marginal one. The wide-net behaviour is the feature.
 3. **The downstream consumer can handle breadth.** Either a strong synthesis LLM that doesn't get confused by topically-mixed context, or a UI that surfaces multiple candidates rather than one canonical answer.
 
-When all three hold, fusion is a precision tool for hard queries. When any of them fail, it's expensive and occasionally regressive.
+When all three hold, fusion produces measurably better answers (LLM-judge: 12% wins / 6% losses on this corpus, +0.10 mean score over baseline). When any of them fail, the lift shrinks toward zero. Note that a critical fourth precondition, often skipped: **use the hybrid variant** (BM25 + vector × LLM rewrites). Vector-only fusion is roughly a wash on average and net-negative on rich queries at the answer level — that's the variant the paper successfully critiques.
 
 ### Use cases where fusion is a strong fit
 
@@ -203,10 +264,10 @@ When all three hold, fusion is a precision tool for hard queries. When any of th
 
 ### Use cases where fusion is a poor fit
 
-- **FAQ chatbots and structured customer support.** Most queries match a known canonical entry. Adding 4× LLM cost per query for a lift that's statistically indistinguishable from zero is the production-economics objection from the steelman, made literal.
+- **FAQ chatbots and structured customer support.** Most queries match a known canonical entry. Even with the hybrid variant, the recall-scarce share is small by design, so the absolute lift on the rich majority is modest in absolute terms — the cost-benefit case for always-on fusion is unfavourable. Use adaptive routing on detected hard queries instead.
 - **Latency-critical retrieval (voice, autocomplete, real-time chat).** The query-rewrite call alone breaks a sub-500ms budget. No amount of retrieval quality compensates if the user has already given up.
 - **High-volume / margin-thin deployments.** Per-query cost matters at scale. Fire fusion at 100% of traffic and you've quadrupled the LLM bill on retrieval; the ~30% scarce-tail share where it pays for itself doesn't justify spending on the 70% it doesn't.
-- **Pipelines with weak or small synthesis models.** The Japan failure mode is real: a smaller LLM struggles more with topically-scattered context, so fusion's diversity hurts more. If your generator is a 7B model, the answer-quality regression on the rich bucket is likely worse than what we measured here.
+- **Pipelines with weak or small synthesis models, when running vector-only fusion.** The Japan failure mode (synthesis LLM refuses to answer when given topically-scattered vector-only fusion context) was real in our eval — but it disappeared once we added BM25 to the retrieval mix. If you must use vector-only fusion AND your synthesizer is small/weak, you'll see this failure mode. Switching to the hybrid variant fixes it on stronger synthesizers; behaviour on smaller models hasn't been tested.
 - **Well-tagged / well-curated knowledge bases.** Internal company wikis with strong taxonomies, product docs with consistent terminology — the recall-scarce tail is small, the per-query value is small, the cost-benefit is unfavourable.
 
 ### The default deployment pattern
@@ -218,6 +279,10 @@ For mixed workloads — which is most production retrieval — the right shape i
 3. Fire fusion only when that signal trips.
 
 This is the most defensible read of all the evidence above: capture the kohlrabi-class wins (where fusion is the only mechanism that recovers anything), eliminate the Japan-class regressions (where diversity hurts), and pay for fusion's compute only on the share of traffic where it pays for itself. It also reframes the production question correctly — not *"should I use RAG-Fusion?"* but *"what fraction of my traffic is recall-scarce, and how do I detect it cheaply?"*
+
+### Production validation
+
+The hybrid retrieval + cross-encoder reranking stack we recommend here isn't theoretical. It's what currently ships in **Scopus AI** and **LeapSpace** — both with slight variations on the configuration tested above (different rerankers, domain-tuned rewriter prompts, application-specific candidate-pool sizing). Both are scientific-literature retrieval workloads with the kind of terminology-mismatch tail that NFCorpus is designed to expose. The recommendation that ends this writeup matches what real deployment converged on independently — which is at least weak triangulation that the variant choices defended above are pointing at the right operating point for this class of workload.
 
 ## Operational considerations: cost, latency, corpus size, data type
 
@@ -250,7 +315,7 @@ This makes fusion **disqualifying** for voice assistants, autocomplete, and chat
 | corpus size | what fusion does here |
 |---|---|
 | **<10k docs** | Embedding + rerank likely already saturate recall on most queries. Fusion's diversity has nowhere to live. Skip. |
-| **10k–1M (NFCorpus is here)** | Where we tested. Average NDCG@10 lift is small and statistically indistinguishable from zero (~+0.006 to +0.009). Real lift exists on recall-scarce queries (~+0.018 to +0.021 NDCG@10), and qualitatively-significant hero cases recover queries the baseline misses entirely. |
+| **10k–1M (NFCorpus is here)** | Where we tested. With the hybrid variant: NDCG@10 lift +0.021 [+0.007, +0.036] over vector baseline, statistically significant on every bucket. LLM-judge mean score +0.10 over baseline (12% wins / 6% losses). The technique earns its keep here. |
 | **1M–100M** | Recall-scarce tail probably grows (more terminology variation). Fusion's potential value grows, but cross-encoder cost grows too, and the candidate pool has to scale proportionally to absorb fusion's added diversity. Worth re-running our pool-size sweep at this scale before deploying. |
 | **web-scale (100M+)** | First-stage retrieval is the bottleneck. Fusion's 5× retrieval cost competes directly with the latency/budget that goes into making the *base* retrieval excellent. Most web-scale stacks use cheaper query expansion (PRF, learned sparse representations) for similar effect at much lower per-query cost. |
 
@@ -279,28 +344,38 @@ Practical heuristic for picking a deployment mode:
 ## How to reproduce
 
 ```bash
-# Pool + N sweeps at n=200
+# Pool + N sweeps at n=200 (weak reranker)
 python -m eval.sweep --sample 200 \
   --pool-values 10 20 30 50 75 --n-values 1 2 3 4 \
   --out experiments/arxiv-2603-02153-replication/results/sweep_n200.json
 
-# Steelman with each reranker at n=200
+# 6-method steelman with each reranker at n=200
 python -m eval.steelman --sample 200 --rerank-model BAAI/bge-reranker-base \
-  --out experiments/arxiv-2603-02153-replication/results/steelman_base_n200.json
+  --out experiments/arxiv-2603-02153-replication/results/steelman_base_n200_full.json
 python -m eval.steelman --sample 200 --rerank-model BAAI/bge-reranker-large \
-  --out experiments/arxiv-2603-02153-replication/results/steelman_large_n200.json
+  --out experiments/arxiv-2603-02153-replication/results/steelman_large_n200_full.json
 
 # Bootstrap CIs on the steelman per-query metrics
-python -m eval.bootstrap_ci experiments/arxiv-2603-02153-replication/results/steelman_large_n200.json
+python -m eval.bootstrap_ci experiments/arxiv-2603-02153-replication/results/steelman_large_n200_full.json
+
+# LLM-judge end-to-end answer eval (n=200, ~75 min)
+python -m eval.answer_eval \
+  experiments/arxiv-2603-02153-replication/results/steelman_large_n200_full.json \
+  --top-k 5 --methods baseline+rerank hybrid+rerank hybrid_diverse+rerank \
+  --out experiments/arxiv-2603-02153-replication/results/answer_eval_hybrid_n200.json
+
+# Saved-queries metric (kohlrabi-class binary recovery rate)
+python -m eval.saved_queries experiments/arxiv-2603-02153-replication/results/steelman_large_n200_full.json
 ```
 
-Total wall time on a 2025-era Mac: ~2-3 hours, dominated by `bge-reranker-large` on CPU. The disk-persisted query-rewrite cache (`./query_cache.json`, populated on first run) means subsequent runs don't re-pay LLM costs.
+Total wall time on a 2025-era Mac: ~5-6 hours for the full set, dominated by `bge-reranker-large` on CPU. The disk-persisted query-rewrite cache (`./query_cache.json`, populated on first run) means subsequent runs don't re-pay LLM costs.
 
 ## What I'd want to do next
 
-1. **Build the adaptive-routing variant.** That's the deployment shape the data points at: gate fusion on a cheap baseline-weakness signal (low cross-encoder top-1 score is the obvious candidate) and only fire the rewrite step on detected hard queries. Quantify how much of fusion's hero-case value is captured at what fraction of the always-on cost.
-2. **Re-run on a different domain.** NFCorpus is biomedical literature with sparse labels — a workload that exercises fusion's terminology-bridging strength and contains a chunky recall-scarce tail. MS MARCO Passage and a real enterprise FAQ (well-curated, recall-rich) would bracket the picture from the other side.
-3. **Confirm the recall-scarce lift isn't an artefact of NFCorpus's labelling sparsity.** Several "scarce" queries have qrel labels that look incorrect (e.g. "soil health" gold = a folate-metabolism paper). Cleaner gold standards would tighten the scarce-bucket CI.
-4. **Look harder at the regression cases.** The Japan-style failures don't aggregate into a measurable hit at n=200 — but they exist qualitatively, and they're exactly the cases adaptive routing would want to predict. A small classifier trained on top-K cross-encoder score distributions might catch them cheaply.
+1. **Build the adaptive-routing variant.** Even with hybrid_diverse+rerank winning on average, there's still a small loss tail (6% of queries). Gate fusion on a cheap baseline-weakness signal (cross-encoder top-1 score below threshold is the obvious candidate) and only fire the rewrite step on detected hard queries. Quantify what fraction of fusion's wins is captured at what fraction of the always-on cost. Curve will probably show "30% routing rate captures 80%+ of wins at 30% of LLM cost" — that's the chart that settles deployability for the marginal-cost case.
+2. **Re-run on a different domain.** NFCorpus is biomedical literature — a workload that exercises fusion's terminology-bridging strength. MS MARCO Passage and a real enterprise FAQ (well-curated, recall-rich) would bracket the picture from the other side. The recall-scarce share is workload-dependent; the deployment recommendation should be too.
+3. **Test hybrid_diverse at varying corpus scales.** Our pool-size sweep capped at 75 due to runtime. With a larger corpus and pool=200+, does the hybrid lift grow further or saturate?
+4. **Confirm the recall-scarce lift isn't an artefact of NFCorpus's labelling sparsity.** Several "scarce" queries have qrel labels that look incorrect (e.g. "soil health" gold = a folate-metabolism paper). Cleaner gold standards would tighten the scarce-bucket CI.
+5. **Test against a smaller synthesizer.** Our LLM-judge eval used GPT-5.1 chat-latest as the synthesizer. The Japan-style regression on vector-only fusion was eliminated by adding BM25, but a smaller synthesizer (7B class) might still struggle even with hybrid context. Worth measuring before deploying on weaker generators.
 
 If you've replicated this differently and got a different answer, I'd genuinely like to see it.

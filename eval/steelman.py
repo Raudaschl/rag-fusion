@@ -22,7 +22,7 @@ from tqdm import tqdm
 
 from eval.dataset import download_nfcorpus, load_nfcorpus, load_into_chromadb, sample_queries
 from eval.query_cache import cached_generate
-from eval.retrieval import single_query_retrieve, with_rerank
+from eval.retrieval import single_query_retrieve, with_rerank, bm25_search
 from eval.rerank import rerank
 from eval.metrics import precision_at_k, recall_at_k, ndcg_at_k, mrr
 from main import vector_search, reciprocal_rank_fusion
@@ -60,6 +60,69 @@ def make_fuse_then_rerank(n_rewrites=4, candidate_pool=50, qid_lookup=None,
         fused = reciprocal_rank_fusion(all_results, verbose=False)
         return list(fused.keys())[:k]
     return with_rerank(base, candidate_pool=candidate_pool, model_name=rerank_model)
+
+
+def make_hybrid_baseline(candidate_pool=50, rerank_model="BAAI/bge-reranker-base"):
+    """Hybrid baseline: BM25 + vector for the original query, fused via RRF, then reranked.
+    No LLM rewrites — this is the 'free lunch' baseline that adds BM25 to the dense retriever.
+    """
+    def base(query, collection, k=10):
+        all_results = {
+            f"bm25:{query}": bm25_search(query, collection, n_results=k),
+            f"vector:{query}": vector_search(query, collection, n_results=k),
+        }
+        fused = reciprocal_rank_fusion(all_results, verbose=False)
+        return list(fused.keys())[:k]
+    return with_rerank(base, candidate_pool=candidate_pool, model_name=rerank_model)
+
+
+def make_hybrid_diverse_fuse_then_rerank(n_rewrites=4, candidate_pool=50, qid_lookup=None,
+                                          rerank_model="BAAI/bge-reranker-base"):
+    """The strongest fusion variant in the repo: for each query (Q1 + N rewrites), do BOTH
+    BM25 and vector search; fuse all 2*(N+1) result lists via RRF; rerank the fused pool.
+    """
+    def base(query, collection, k=10):
+        qid = qid_lookup.get(query) if qid_lookup else query
+        rewrites = cached_generate(qid, query, diverse=True)[:n_rewrites]
+        all_queries = [query] + rewrites
+        all_results = {}
+        for q in all_queries:
+            all_results[f"bm25:{q}"] = bm25_search(q, collection, n_results=k)
+            all_results[f"vector:{q}"] = vector_search(q, collection, n_results=k)
+        fused = reciprocal_rank_fusion(all_results, verbose=False)
+        return list(fused.keys())[:k]
+    return with_rerank(base, candidate_pool=candidate_pool, model_name=rerank_model)
+
+
+def make_hybrid_per_query_rerank_then_fuse(n_rewrites=4, per_query_pool=10, qid_lookup=None,
+                                            rerank_model="BAAI/bge-reranker-base"):
+    """Cross-encoder integrated into each sub-query's pipeline before fusion.
+
+    For each Qi in (Q1 + N rewrites):
+      1. candidates_i = RRF(BM25(Qi), vector(Qi))         [hybrid retrieval per query]
+      2. reranked_i   = cross_encoder.rerank(Qi, candidates_i)[:per_query_pool]
+    RRF across all reranked_i lists; truncate to k.
+
+    This is the "fusion that uses a cross-encoder inside, not just as a post-hoc filter"
+    variant — the hybrid extension of the paper's pipeline ordering.
+    """
+    def retrieve(query, collection, k=10):
+        qid = qid_lookup.get(query) if qid_lookup else query
+        rewrites = cached_generate(qid, query, diverse=True)[:n_rewrites]
+        all_queries = [query] + rewrites
+        per_query_reranked = {}
+        for q in all_queries:
+            local = {
+                f"bm25:{q}": bm25_search(q, collection, n_results=per_query_pool),
+                f"vector:{q}": vector_search(q, collection, n_results=per_query_pool),
+            }
+            local_fused = reciprocal_rank_fusion(local, verbose=False)
+            local_ids = list(local_fused.keys())[:per_query_pool]
+            ranked = rerank(q, local_ids, collection, top_k=per_query_pool, model_name=rerank_model)
+            per_query_reranked[q] = {d: per_query_pool - i for i, d in enumerate(ranked)}
+        fused = reciprocal_rank_fusion(per_query_reranked, verbose=False)
+        return list(fused.keys())[:k]
+    return retrieve
 
 
 def per_query_metrics(retrieved_by_qid, qrels, k_values):
@@ -123,14 +186,27 @@ def main():
         "baseline+rerank":
             with_rerank(single_query_retrieve, candidate_pool=args.candidate_pool,
                         model_name=args.rerank_model),
+        "hybrid+rerank":
+            make_hybrid_baseline(candidate_pool=args.candidate_pool,
+                                 rerank_model=args.rerank_model),
         "fuse_then_rerank (mine)":
             make_fuse_then_rerank(n_rewrites=args.n_rewrites,
                                   candidate_pool=args.candidate_pool, qid_lookup=qid_lookup,
                                   rerank_model=args.rerank_model),
+        "hybrid_diverse+rerank":
+            make_hybrid_diverse_fuse_then_rerank(n_rewrites=args.n_rewrites,
+                                                  candidate_pool=args.candidate_pool,
+                                                  qid_lookup=qid_lookup,
+                                                  rerank_model=args.rerank_model),
         "rerank_per_query_then_fuse (paper)":
             make_paper_pipeline(n_rewrites=args.n_rewrites,
                                 per_query_pool=args.per_query_pool, qid_lookup=qid_lookup,
                                 rerank_model=args.rerank_model),
+        "hybrid_per_query_rerank_then_fuse":
+            make_hybrid_per_query_rerank_then_fuse(n_rewrites=args.n_rewrites,
+                                                    per_query_pool=args.per_query_pool,
+                                                    qid_lookup=qid_lookup,
+                                                    rerank_model=args.rerank_model),
     }
     print(f"reranker: {args.rerank_model}")
 
