@@ -2,9 +2,13 @@
 
 ## Overview
 
-RAG-Fusion is a search methodology that aims to bridge the gap between traditional search paradigms and the multifaceted dimensions of human queries. Where Retrieval Augmented Generation (RAG) fuses vector search with generative models, RAG-Fusion goes a step further — employing multiple query generation and Reciprocal Rank Fusion to re-rank search results. The overarching goal is to move closer to unearthing that elusive 90% of transformative knowledge that often remains hidden behind top search results.
+RAG-Fusion is a search methodology that aims to bridge the gap between traditional search paradigms and the multifaceted dimensions of human queries. Where Retrieval Augmented Generation (RAG) fuses vector search with generative models, RAG-Fusion goes a step further — employing multiple query generation and Reciprocal Rank Fusion to re-rank search results. The aim is to surface relevant material a single phrasing of the query would miss, particularly when the user's vocabulary doesn't match how the corpus is indexed.
 
 For the full story behind the approach, see the article: [Forget RAG, the Future is RAG-Fusion](https://adrianraudaschl.com/blog/forget-rag-the-future-is-rag-fusion/).
+
+> **Where this technique fits, in one line:** RAG-Fusion is a precision tool for the recall-scarce tail — queries where the user's words don't match the corpus's words. It's not a default-on quality boost for well-formed queries against well-curated corpora.
+>
+> The full empirical case for that read — including a replication of arXiv 2603.02153v1, a stronger-reranker steelman, and end-to-end answer-quality eval — lives in [`experiments/arxiv-2603-02153-replication/`](./experiments/arxiv-2603-02153-replication/README.md).
 
 ## How It Works
 
@@ -45,17 +49,47 @@ For the full story behind the approach, see the article: [Forget RAG, the Future
 
 4. **Output Generation** — Produces a final re-ranked list of documents, optionally synthesised into a natural language answer via LLM.
 
+## When to use RAG-Fusion
+
+The technique earns its compute when three conditions hold:
+
+1. **Terminology mismatch between user queries and indexed text** (lay vs technical names, jargon, paraphrase).
+2. **Recall matters more than precision** — missing a relevant document is more costly than including a marginal one.
+3. **The downstream consumer can handle topically-broad context** — either a strong synthesis LLM, or a UI that surfaces multiple candidates rather than one canonical answer.
+
+Strong-fit examples:
+- Academic / scientific literature search, biomedical research
+- Patent prior-art search, legal e-discovery, regulatory review
+- Long-tail e-commerce ("phone holder thing for car" → "magnetic vent mount")
+- Cold-start retrieval over specialist corpora the embedding model hasn't seen
+- Exploratory / "show me what's out there" workflows
+
+Poor-fit examples:
+- FAQ chatbots and curated customer-support knowledge bases
+- Latency-critical retrieval (voice, autocomplete, sub-second-p95 chat)
+- High-volume / margin-thin consumer search
+- Code or identifier search (precision-dominated)
+- Structured data, knowledge graphs, SQL-backed retrieval
+
+For mixed workloads — most production retrieval — the right pattern is **adaptive routing**: run baseline+rerank on every query, fire fusion only when a cheap weakness signal trips. This captures the long-tail wins, eliminates the regression cases on easy queries, and pays for fusion's compute only on traffic where it earns it. See [`experiments/arxiv-2603-02153-replication/`](./experiments/arxiv-2603-02153-replication/README.md) for the data behind these recommendations, including cost and latency analysis across corpus sizes and data types.
+
 ## Project Structure
 
 ```
-├── main.py              # Core RAG-Fusion pipeline
-├── evaluate.py          # Evaluation CLI entry point
-├── test_main.py         # Unit tests
+├── main.py                 # Core RAG-Fusion pipeline
+├── evaluate.py             # Evaluation CLI (baseline + fusion variants, optional --rerank)
+├── test_main.py            # Unit tests
 ├── eval/
-│   ├── dataset.py       # NFCorpus download & loading
-│   ├── metrics.py       # IR metrics (Precision, Recall, NDCG, MRR)
-│   └── retrieval.py     # Retrieval methods (BM25, vector, hybrid, RAG-Fusion variants)
-└── .env.example         # Environment template
+│   ├── dataset.py          # NFCorpus download & loading
+│   ├── metrics.py          # IR metrics (Precision, Recall, NDCG, MRR)
+│   ├── retrieval.py        # Retrieval methods (BM25, vector, hybrid, RAG-Fusion variants)
+│   ├── rerank.py           # Cross-encoder reranking stage
+│   ├── sweep.py            # Pool-size and N-rewrites sweep driver
+│   ├── steelman.py         # Pipeline-ordering / truncation / difficulty tests
+│   └── qualitative.py      # End-to-end answer-quality eval driver
+├── experiments/
+│   └── arxiv-2603-02153-replication/  # Full replication writeup + raw results
+└── .env.example            # Environment template
 ```
 
 ## Getting Started
@@ -110,6 +144,16 @@ Six methods are compared:
 - **Hybrid+Diverse** — the best of both: runs RAG-Fusion (diverse prompt) but searches each query with both BM25 and vector search, then fuses all results via RRF. Best overall performer with **+22% NDCG@5**, **+40% recall@10**, and **+25% MRR** over baseline.
 
 Three key insights emerge. First, **hybrid search is a free lunch** — fusing BM25 and vector results via RRF costs nothing extra and improves ranking quality, especially MRR. Second, the **diverse prompt** outperforms standard RAG-Fusion by forcing the LLM to explore genuinely different angles rather than generating semantically close variations. Third, **the two techniques are fully complementary** — hybrid's keyword precision and diverse's semantic breadth combine cleanly through RRF, producing the strongest results across every metric.
+
+### Beyond retrieval-only metrics
+
+The table above measures retrieval quality in isolation. A more honest production picture requires layering in a cross-encoder reranker, varying the candidate-pool size, and reading the actual generated answers — because retrieval lifts at NDCG@10 don't always survive into the answers a user sees. Adding a `--rerank` flag changes the comparison materially: a strong reranker (`bge-reranker-large`) absorbs ~68% of fusion's lift on this corpus, fusion goes net-negative on the easy ~67% of queries, and fusion's value concentrates almost entirely in the recall-scarce tail. See [`experiments/arxiv-2603-02153-replication/`](./experiments/arxiv-2603-02153-replication/README.md) for the full picture: pool-size and N-rewrites sweeps, pipeline-ordering steelman, end-to-end answer eval, and cost/latency analysis by corpus size and data type.
+
+```bash
+# Production-style comparison: candidate pool of 50, then reranked + truncated
+python evaluate.py --sample 50 --rerank --candidate-pool 50 \
+  --methods baseline hybrid rag-fusion rag-fusion-diverse hybrid-diverse
+```
 
 ### Running the evaluation
 

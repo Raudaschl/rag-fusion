@@ -9,7 +9,7 @@ from eval.dataset import download_nfcorpus, load_nfcorpus, load_into_chromadb, s
 from eval.retrieval import (
     bm25_retrieve, single_query_retrieve, hybrid_retrieve, rag_fusion_retrieve,
     rag_fusion_diverse_retrieve, rag_fusion_weighted_retrieve,
-    hybrid_diverse_retrieve, run_evaluation,
+    hybrid_diverse_retrieve, run_evaluation, with_rerank,
 )
 
 
@@ -65,7 +65,8 @@ def _format_delta(baseline_val, fusion_val):
     return f"{sign}{pct:.1f}%"
 
 
-def show_example_queries(query_ids, queries, qrels, collection, methods, method_registry):
+def show_example_queries(query_ids, queries, qrels, collection, methods, method_registry,
+                         rerank_args=None):
     """Display top-5 docs from each method for 3 example queries, marking relevant ones."""
     example_ids = query_ids[:3]
 
@@ -81,6 +82,10 @@ def show_example_queries(query_ids, queries, qrels, collection, methods, method_
             display_name, method_fn, needs_api_key = method_registry[method_key]
             if needs_api_key and not os.getenv("OPENAI_API_KEY"):
                 continue
+            if rerank_args is not None:
+                from eval.retrieval import with_rerank
+                method_fn = with_rerank(method_fn, **rerank_args)
+                display_name = f"{display_name}+Rerank"
             docs = method_fn(query_text, collection, k=5)
             print(f"  {display_name} top-5:")
             for i, doc_id in enumerate(docs, 1):
@@ -100,6 +105,14 @@ def main():
                         choices=["bm25", "baseline", "hybrid", "rag-fusion", "rag-fusion-diverse",
                                  "rag-fusion-weighted", "hybrid-diverse"],
                         help="Methods to evaluate (default: baseline rag-fusion)")
+    parser.add_argument("--rerank", action="store_true",
+                        help="Apply cross-encoder reranking + truncation after retrieval "
+                             "(replicates the post-retrieval pipeline from arxiv 2603.02153).")
+    parser.add_argument("--candidate-pool", type=positive_int, default=50,
+                        help="Candidate pool size before reranking (default: 50). "
+                             "Only used when --rerank is set.")
+    parser.add_argument("--rerank-model", type=str, default="BAAI/bge-reranker-base",
+                        help="Cross-encoder model name (default: BAAI/bge-reranker-base).")
     args = parser.parse_args()
 
     # Download and load dataset
@@ -124,6 +137,9 @@ def main():
         "hybrid-diverse": ("Hybrid+Diverse", hybrid_diverse_retrieve, True),
     }
 
+    if args.rerank:
+        print(f"Reranking enabled: candidate_pool={args.candidate_pool}, model={args.rerank_model}\n")
+
     all_metrics = {}
     for method_key in args.methods:
         display_name, method_fn, needs_api_key = method_registry[method_key]
@@ -131,6 +147,10 @@ def main():
             print(f"WARNING: OPENAI_API_KEY not set. Skipping {display_name}.\n")
             all_metrics[display_name] = None
             continue
+        if args.rerank:
+            method_fn = with_rerank(method_fn, candidate_pool=args.candidate_pool,
+                                    model_name=args.rerank_model)
+            display_name = f"{display_name}+Rerank"
         print(f"Running {display_name} retrieval ...")
         all_metrics[display_name] = run_evaluation(query_ids, queries, qrels, collection, method_fn, args.k)
         print(f"{display_name} evaluation complete.\n")
@@ -141,7 +161,12 @@ def main():
     # Show example queries if any method produced results
     if any(v is not None for v in all_metrics.values()):
         print("\n--- Example Queries (top-5 results) ---")
-        show_example_queries(query_ids, queries, qrels, collection, args.methods, method_registry)
+        rerank_args = (
+            {"candidate_pool": args.candidate_pool, "model_name": args.rerank_model}
+            if args.rerank else None
+        )
+        show_example_queries(query_ids, queries, qrels, collection, args.methods,
+                             method_registry, rerank_args=rerank_args)
 
 
 if __name__ == "__main__":

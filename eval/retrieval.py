@@ -92,6 +92,23 @@ def hybrid_diverse_retrieve(query, collection, k=10):
     return list(fused.keys())[:k]
 
 
+def with_rerank(method_fn, candidate_pool=50, model_name="BAAI/bge-reranker-base"):
+    """Wrap a retrieval method with cross-encoder reranking + truncation.
+
+    Retrieves `candidate_pool` candidates from the underlying method, then reranks and
+    truncates to k. This is the production-style pipeline arxiv 2603.02153 argues absorbs
+    fusion's upstream recall gains.
+    """
+    from eval.rerank import rerank
+
+    def wrapped(query, collection, k=10):
+        pool = max(candidate_pool, k)
+        candidates = method_fn(query, collection, k=pool)
+        return rerank(query, candidates, collection, top_k=k, model_name=model_name)
+
+    return wrapped
+
+
 def run_evaluation(query_ids, queries, qrels, collection, method_fn, k_values):
     max_k = max(k_values)
     results = {}
