@@ -17,19 +17,9 @@ import time
 from functools import lru_cache
 
 from eval.dataset import download_nfcorpus, load_nfcorpus, load_into_chromadb, sample_queries
+from eval.query_cache import cached_generate
 from eval.retrieval import single_query_retrieve, with_rerank, run_evaluation
-from main import generate_queries_chatgpt, vector_search, reciprocal_rank_fusion
-
-
-_query_cache = {}
-
-
-def cached_generate(qid, query, diverse=True):
-    """Cache query rewrites per (qid, diverse) so the N sweep doesn't pay 4x LLM cost."""
-    key = (qid, diverse)
-    if key not in _query_cache:
-        _query_cache[key] = generate_queries_chatgpt(query, diverse=diverse)
-    return _query_cache[key]
+from main import vector_search, reciprocal_rank_fusion
 
 
 def make_rag_fusion_n(n, diverse=True, qid_lookup=None):

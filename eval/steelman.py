@@ -21,20 +21,11 @@ import time
 from tqdm import tqdm
 
 from eval.dataset import download_nfcorpus, load_nfcorpus, load_into_chromadb, sample_queries
+from eval.query_cache import cached_generate
 from eval.retrieval import single_query_retrieve, with_rerank
 from eval.rerank import rerank
 from eval.metrics import precision_at_k, recall_at_k, ndcg_at_k, mrr
-from main import generate_queries_chatgpt, vector_search, reciprocal_rank_fusion
-
-
-_query_cache = {}
-
-
-def cached_generate(qid, query, diverse=True):
-    key = (qid, diverse)
-    if key not in _query_cache:
-        _query_cache[key] = generate_queries_chatgpt(query, diverse=diverse)
-    return _query_cache[key]
+from main import vector_search, reciprocal_rank_fusion
 
 
 def make_paper_pipeline(n_rewrites=4, per_query_pool=10, qid_lookup=None,

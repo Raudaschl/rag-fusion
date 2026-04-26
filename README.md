@@ -6,9 +6,9 @@ RAG-Fusion is a search methodology that aims to bridge the gap between tradition
 
 For the full story behind the approach, see the article: [Forget RAG, the Future is RAG-Fusion](https://adrianraudaschl.com/blog/forget-rag-the-future-is-rag-fusion/).
 
-> **Where this technique fits, in one line:** RAG-Fusion is a precision tool for the recall-scarce tail — queries where the user's words don't match the corpus's words. It's not a default-on quality boost for well-formed queries against well-curated corpora.
+> **Where this technique fits, in one line:** RAG-Fusion is a precision tool for the recall-scarce tail — queries where the user's words don't match the corpus's words. On the rest, it's approximately a wash. It is not a default-on quality boost for well-formed queries against well-curated corpora.
 >
-> The full empirical case for that read — including a replication of arXiv 2603.02153v1, a stronger-reranker steelman, and end-to-end answer-quality eval — lives in [`experiments/arxiv-2603-02153-replication/`](./experiments/arxiv-2603-02153-replication/README.md).
+> The full empirical case for that read — replication of arXiv 2603.02153v1, paired-bootstrap CIs on n=200 NFCorpus queries, weak/strong reranker comparison, end-to-end answer-quality eval, and operational analysis by cost / latency / corpus size / data type — lives in [`experiments/arxiv-2603-02153-replication/`](./experiments/arxiv-2603-02153-replication/README.md).
 
 ## How It Works
 
@@ -147,7 +147,7 @@ Three key insights emerge. First, **hybrid search is a free lunch** — fusing B
 
 ### Beyond retrieval-only metrics
 
-The table above measures retrieval quality in isolation. A more honest production picture requires layering in a cross-encoder reranker, varying the candidate-pool size, and reading the actual generated answers — because retrieval lifts at NDCG@10 don't always survive into the answers a user sees. Adding a `--rerank` flag changes the comparison materially: a strong reranker (`bge-reranker-large`) absorbs ~68% of fusion's lift on this corpus, fusion goes net-negative on the easy ~67% of queries, and fusion's value concentrates almost entirely in the recall-scarce tail. See [`experiments/arxiv-2603-02153-replication/`](./experiments/arxiv-2603-02153-replication/README.md) for the full picture: pool-size and N-rewrites sweeps, pipeline-ordering steelman, end-to-end answer eval, and cost/latency analysis by corpus size and data type.
+The table above measures retrieval quality in isolation, on small samples without confidence intervals. A more honest production picture requires layering in a cross-encoder reranker, running on enough queries that statistical noise doesn't dominate, and reading the actual generated answers. At n=200 with paired-bootstrap CIs, fusion's average NDCG@10 lift over a baseline+rerank pipeline is statistically indistinguishable from zero. The durable benefit is concentrated on the recall-scarce ~30% of queries, where fusion provides a small but real lift (~+0.018 NDCG@10) and qualitatively-meaningful answer recovery. See [`experiments/arxiv-2603-02153-replication/`](./experiments/arxiv-2603-02153-replication/README.md) for the full picture: pool-size and N-rewrites sweeps, pipeline-ordering steelman, end-to-end answer eval, cost/latency analysis by corpus size and data type, and the methodology lessons (small-sample numbers can be very misleading on this benchmark).
 
 ```bash
 # Production-style comparison: candidate pool of 50, then reranked + truncated
