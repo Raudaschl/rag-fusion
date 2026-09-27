@@ -19,6 +19,14 @@
 >
 > Code in [`eval/`](../../eval/): `steelman.py`, `sweep.py`, `bootstrap_ci.py`, `answer_eval.py`, `qualitative.py`, `saved_queries.py`. Reproduction commands at the bottom of this document.
 
+> **Correction, 27 September 2026.** The numbers below were produced with a bug in the query-rewrite parser: for 96 of the 200 queries, two of the four "rewrites" were the LLM's preamble line and an empty string, so N=4 was effectively N=2 plus junk, and the N=1 strict replication used the preamble as its rewrite for 48% of queries. I've fixed it and re-run everything on the same cached rewrites; the full comparison is in [`../jev-in-the-pipeline/`](../jev-in-the-pipeline/). In short:
+>
+> - **The retrieval conclusions hold, slightly stronger.** `hybrid_diverse+rerank` lift is now +0.027 (bge-base), +0.015 (FlashRank) and +0.025 (bge-large) NDCG@10, all CIs excluding zero. The paper's exact configuration still shows no significant lift (+0.005 [-0.016, +0.027]).
+> - **The answer-quality claim is weaker than stated below.** Across three judge runs, fusion beats the baseline in all three but significantly in only two, and run-to-run variation is as large as the effect. "Measurably better answers" should read "better retrieval, and probably somewhat better answers".
+> - The April judge also showed methods in fixed positions; it now shuffles them. With shuffling, there's no sign that position biased the scores.
+>
+> The original text is left as it was, so the history of the reversals stays visible.
+
 **TL;DR.** Replicating arXiv 2603.02153v1 on NFCorpus, the paper's "fusion gains evaporate after rerank+truncation" claim partly reproduces — *for vector-only fusion with a single LLM rewrite*. But when you compare the technique's **strong variant** (`hybrid_diverse+rerank`: BM25 + vector × 4 rewrites, RRF, then cross-encoder rerank) against the same baseline at n=200 with paired-bootstrap CIs, fusion has **a real, statistically significant lift on every metric and every bucket**:
 
 - **NDCG@10**: +0.021 [+0.007, +0.036] overall; +0.016 [+0.001, +0.032] on rich queries; +0.031 [+0.005, +0.072] on recall-scarce queries — significant on all three.
@@ -280,6 +288,8 @@ For mixed workloads — which is most production retrieval — the right shape i
 
 This is the most defensible read of all the evidence above: capture the kohlrabi-class wins (where fusion is the only mechanism that recovers anything), eliminate the Japan-class regressions (where diversity hurts), and pay for fusion's compute only on the share of traffic where it pays for itself. It also reframes the production question correctly — not *"should I use RAG-Fusion?"* but *"what fraction of my traffic is recall-scarce, and how do I detect it cheaply?"*
 
+> **Update, September 2026:** this routing pattern is still untested. The one router I have since tested, Jev classifying each query's type, fused 78% of queries, saved about a fifth of the rewrite calls at no measurable cost, and didn't separate the queries where fusion helps from those where it doesn't. A router on a retrieval-weakness signal, as described above, is the version worth testing next. See [`../jev-in-the-pipeline/`](../jev-in-the-pipeline/README.md).
+
 ### Production validation
 
 The hybrid retrieval + cross-encoder reranking stack we recommend here isn't theoretical. It's what currently ships in **Scopus AI** and **LeapSpace** — both with slight variations on the configuration tested above (different rerankers, domain-tuned rewriter prompts, application-specific candidate-pool sizing). Both are scientific-literature retrieval workloads with the kind of terminology-mismatch tail that NFCorpus is designed to expose. The recommendation that ends this writeup matches what real deployment converged on independently — which is at least weak triangulation that the variant choices defended above are pointing at the right operating point for this class of workload.
@@ -296,6 +306,8 @@ Per query, fusion adds roughly one extra LLM call (the rewrite step, four querie
 
 At 1M queries/month, that's ~$3K–8K/month over baseline — small in absolute terms but only justified if it's bought concentrated on the queries it helps. Adaptive routing at a ~30% trigger rate cuts that to ~$1K–2.5K/month with no loss of the kohlrabi-class wins. The cost case for default-on fusion is weakest at low per-query margins (consumer-scale chatbots, search ads) and easiest at high-stakes individual queries (legal e-discovery, patent prior-art) where one missed document can cost more than a year of fusion compute.
 
+> **Update, September 2026: measured rather than estimated.** With `gpt-6-luna` at low reasoning effort (the model that generated April's rewrites has since been retired), the rewrite call measured **$0.055 per 1,000 queries**, about $0.00006 per query, which is 50 to 150 times below the estimate above. At that price the rewrite's dollar cost barely matters; its latency does. Details in [`../jev-in-the-pipeline/`](../jev-in-the-pipeline/README.md#6-what-each-option-costs).
+
 ### Latency
 
 Fusion's overhead is **structurally serial**: the rewrite LLM call has to finish before any retrieval starts, and it can't be streamed or parallelised away. Typical numbers:
@@ -309,6 +321,8 @@ Fusion's overhead is **structurally serial**: the rewrite LLM call has to finish
 | **p99 tail** | ~1500 ms | ~3500 ms+ |
 
 This makes fusion **disqualifying** for voice assistants, autocomplete, and chat experiences with sub-second p95 targets. It's neutral-to-fine for analytical workflows, research workbenches, and async batch retrieval where answer quality dominates over response speed. Adaptive routing helps here too — only the small fraction of queries that route to fusion pay the rewrite latency, and that fraction is by definition the queries where the user has a higher tolerance for "let me think about this one."
+
+> **Update, September 2026:** the measured median for the rewrite call was 1.56 s on a laptop over a home connection, at the top of the range above, and the 10-list hybrid retrieval added 0.43 s. Reranking 50 documents took 0.7 to 2.2 s for the cross-encoders on the laptop (they'd be much faster on a server GPU you host) and 0.34 s for Jev, a hosted service. See [`../jev-in-the-pipeline/`](../jev-in-the-pipeline/README.md#6-what-each-option-costs).
 
 ### Corpus size
 

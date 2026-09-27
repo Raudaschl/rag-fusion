@@ -6,31 +6,33 @@ RAG-Fusion is a search methodology that aims to bridge the gap between tradition
 
 For the full story behind the approach, see the article: [Forget RAG, the Future is RAG-Fusion](https://adrianraudaschl.com/blog/forget-rag-the-future-is-rag-fusion/).
 
-> **Where this technique fits, in one line:** Properly-configured RAG-Fusion (`hybrid_diverse+rerank`: BM25 + vector × LLM rewrites, fused via RRF, then cross-encoder reranked) produces measurably better retrieval rankings *and* better generated answers than baseline retrieval — at proper sample sizes with confidence intervals, on every difficulty bucket, even with a strong reranker. **The vector-only fusion variant is a different story** — it's roughly a wash on average and net-negative on rich queries at the answer level. If you deploy fusion, deploy the hybrid variant.
+> **Where this technique fits, in one line:** Properly configured RAG-Fusion (`hybrid_diverse+rerank`: BM25 + vector for the original query and LLM rewrites, fused via RRF, then reranked) reliably improves retrieval after reranking, on every reranker tested, and most of all with the strongest one: +0.025 NDCG@10 with `bge-reranker-large`, +0.050 with Jev (n=200, 95% CIs excluding zero). Its effect on the generated answer is positive but noisy: fusion won more LLM-judge comparisons than it lost in all three judge runs, and significantly in two. The vector-only fusion variant is roughly a wash once a reranker is added. If you deploy fusion, deploy the hybrid variant and put your strongest reranker behind it.
 >
-> Detailed empirical writeup — n=200 paired-bootstrap CIs, three rerankers, six fusion variants, end-to-end LLM-judge answer eval, including a replication of arXiv [2603.02153v1](https://arxiv.org/html/2603.02153v1) — lives in [`experiments/arxiv-2603-02153-replication/`](./experiments/arxiv-2603-02153-replication/README.md).
+> Write-ups:
+> - [`experiments/jev-in-the-pipeline/`](./experiments/jev-in-the-pipeline/README.md) (September 2026): four rerankers including Jev, a decision model from TypeSafe; cost and latency per configuration; three ways of putting Jev inside fusion; a narrated explainer video; and a rewrite-parser bug found and fixed along the way.
+> - [`experiments/arxiv-2603-02153-replication/`](./experiments/arxiv-2603-02153-replication/README.md) (April 2026): the replication of arXiv [2603.02153v1](https://arxiv.org/html/2603.02153v1), with a correction note for the parser bug.
 
 ## How It Works
 
 ```mermaid
-flowchart TD
-    Q[Original Query] --> L[LLM generates multiple queries]
-    L --> V1[Vector Search 1]
-    L --> V2[Vector Search 2]
-    L --> VN[Vector Search N]
-    V1 --> RRF[Reciprocal Rank Fusion]
-    V2 --> RRF
-    VN --> RRF
-    RRF --> OUT[Re-ranked Docs]
+flowchart LR
+    Q["User query"] --> RW["LLM writes 4 rewrites"]
+    Q --> S0["BM25 + vector search<br/>original query"]
+    RW --> S1["BM25 + vector search<br/>each rewrite"]
+    S0 --> RRF["Reciprocal Rank Fusion<br/>score = Σ 1 / (60 + rank)"]
+    S1 --> RRF
+    RRF --> P["Pool of 50 candidates"]
+    P --> RR["Reranker<br/>cross-encoder or Jev"]
+    RR --> T["Top 5 to 10"]
+    T --> A["Answer model"]
 ```
 
-1. **Query Generation** — Takes a user's query and uses OpenAI's GPT to generate multiple search query variations that capture different facets of the original intent.
+1. **Query generation:** an LLM writes several rewrites of the user's query that come at it from different angles (synonyms, narrower and broader framings, related sub-topics).
+2. **Hybrid search:** the original query and every rewrite are searched twice, with BM25 (keywords) and with vector search, which gives ten ranked lists for four rewrites.
+3. **Reciprocal Rank Fusion:** the lists are merged, and each document scores 1 / (60 + rank) summed over every list it appears in, so documents that keep turning up rise.
+4. **Rerank:** a reranker (a cross-encoder, or a decision model such as Jev) re-scores the fused pool, and only the top results reach the model that writes the answer.
 
-2. **Vector Search** — Conducts vector-based searches using ChromaDB on each query, casting a wider net across the document space.
-
-3. **Reciprocal Rank Fusion** — Combines the ranked results from all searches, boosting documents that appear consistently across multiple query perspectives.
-
-4. **Output Generation** — Produces a final re-ranked list of documents, optionally synthesised into a natural language answer via LLM.
+The original version of the technique used vector search only and no reranker, and that's what `main.py` still demonstrates. The hybrid-plus-rerank configuration above is what the experiments in this repo found works; its code is in `eval/`.
 
 ## When to use RAG-Fusion
 
@@ -54,7 +56,9 @@ Poor-fit examples:
 - Code or identifier search (precision-dominated)
 - Structured data, knowledge graphs, SQL-backed retrieval
 
-For mixed workloads — most production retrieval — the right pattern is **adaptive routing**: run baseline+rerank on every query, fire fusion only when a cheap weakness signal trips. This captures the long-tail wins, eliminates the regression cases on easy queries, and pays for fusion's compute only on traffic where it earns it. See [`experiments/arxiv-2603-02153-replication/`](./experiments/arxiv-2603-02153-replication/README.md) for the data behind these recommendations, including cost and latency analysis across corpus sizes and data types.
+What fusion costs is mostly latency, not money. With a small rewrite model the rewrite call is about $0.06 per 1,000 queries but adds about 1.5 seconds before the extra searches can run. Adding BM25 to vector search (hybrid, no rewrites) is close to free and worth doing everywhere. Measurements per configuration are in [`experiments/jev-in-the-pipeline/`](./experiments/jev-in-the-pipeline/README.md#6-what-each-option-costs).
+
+For mixed workloads, routing is the obvious idea: run hybrid+rerank on every query and fire the rewrites only where they're likely to pay. It's still unproven here. The one router tested so far (Jev classifying each query's type) fused 78% of queries, saved about a fifth of the rewrite calls at no measurable cost, and didn't target the queries where fusion helps. A router keyed on a retrieval-weakness signal, such as a low top reranker score, is the next thing to test.
 
 ## Project Structure
 
@@ -66,7 +70,7 @@ For mixed workloads — most production retrieval — the right pattern is **ada
 │   ├── dataset.py          # NFCorpus download & loading
 │   ├── metrics.py          # IR metrics (Precision, Recall, NDCG, MRR)
 │   ├── retrieval.py        # Retrieval methods (BM25, vector, hybrid, RAG-Fusion variants)
-│   ├── rerank.py           # Cross-encoder reranking stage
+│   ├── rerank.py           # Reranking stage: cross-encoders, FlashRank, or Jev
 │   ├── query_cache.py      # Disk-persisted cache for LLM query rewrites
 │   ├── sweep.py            # Pool-size and N-rewrites sweep driver
 │   ├── steelman.py         # Pipeline-ordering / truncation / difficulty tests
@@ -74,9 +78,14 @@ For mixed workloads — most production retrieval — the right pattern is **ada
 │   ├── answer_eval.py      # LLM-judge end-to-end answer eval driver
 │   ├── bootstrap_ci.py     # Paired-bootstrap CIs for steelman per-query metrics
 │   ├── saved_queries.py    # "Saved queries" metric (kohlrabi-class binary recovery)
-│   └── eval_with_ci.py     # Retrieval-only headline table with paired-bootstrap CIs
+│   ├── eval_with_ci.py     # Retrieval-only headline table with paired-bootstrap CIs
+│   ├── jev.py              # Jev client: relevance, intent and query-type calls, cached per run
+│   ├── jev_arms.py         # Jev inside fusion: intent-weighted RRF, query-type router, evidence gate
+│   ├── latency_bench.py    # Per-piece latency and cost benchmark
+│   └── pool_recall.py      # Relevant documents in the pool vs in each reranker's top 10
 ├── experiments/
-│   └── arxiv-2603-02153-replication/  # Full replication writeup + raw results
+│   ├── arxiv-2603-02153-replication/  # April replication write-up + all raw results
+│   └── jev-in-the-pipeline/           # September write-up, benchmarks and explainer video
 └── .env.example            # Environment template
 ```
 
@@ -85,13 +94,15 @@ For mixed workloads — most production retrieval — the right pattern is **ada
 1. Install dependencies:
    ```bash
    pip install openai chromadb python-dotenv tqdm tabulate rank_bm25
+   # optional, for the reranking experiments
+   pip install sentence-transformers flashrank typesafe-sdk
    ```
 
 2. Set up your OpenAI API key:
    ```bash
    cp .env.example .env
    ```
-   Then edit `.env` and replace `your-key-here` with your actual key.
+   Then edit `.env` and replace `your-key-here` with your actual key. `JEV_API_KEY` is only needed for the Jev experiments. The LLM used for rewrites, answers and judging defaults to `gpt-6-luna` at low reasoning effort; override it with `LLM_MODEL` and `LLM_REASONING_EFFORT`.
 
 3. Run the demo:
    ```bash
@@ -108,6 +119,8 @@ For mixed workloads — most production retrieval — the right pattern is **ada
 To move beyond toy examples, the repo includes a quantitative evaluation harness that compares multiple retrieval strategies on a real dataset. It uses [NFCorpus](https://www.cl.uni-heidelberg.de/statnlpgroup/nfcorpus/) (3,633 medical/nutrition documents, 323 test queries with graded relevance judgments) from the [BEIR benchmark](https://github.com/beir-cellar/beir).
 
 ### Retrieval-only results (n=200, paired-bootstrap 95% CIs)
+
+> **Note (September 2026):** this table predates the fix for a rewrite-parser bug that, for about half the queries, fused a preamble line and an empty string as if they were rewrites. It can't be regenerated exactly, because the model that produced its rewrites has since been retired. The post-rerank numbers in both write-ups have been re-run with the fix; there, the bug turned out to have cost fusion slightly rather than flattered it.
 
 The table below is **retrieval-only** — no cross-encoder reranking, no end-to-end answer-quality eval. It's intended as a quick visual of how the fusion variants stack up in their pure retrieval form. For the production-relevant comparison (with cross-encoder rerank, hybrid variants, LLM-judge answer quality, and operational analysis by cost / latency / corpus / data type), see [`experiments/arxiv-2603-02153-replication/`](./experiments/arxiv-2603-02153-replication/README.md). Lifts in the rightmost column are bolded when the 95% CI excludes zero.
 
@@ -135,7 +148,7 @@ Six methods compared:
 
 Three insights emerge that survive proper sample sizes and CIs. First, **hybrid search is a free lunch** — fusing BM25 and vector results via RRF costs nothing extra and improves ranking quality, especially at the top of the ranking. Second, the **diverse prompt** modestly outperforms the standard RAG-Fusion prompt by pushing the LLM toward genuinely different angles. Third, **the two techniques are complementary** — hybrid's keyword precision and diverse's semantic breadth combine through RRF for the strongest retrieval-only result.
 
-> **Caveat: retrieval ≠ production.** Real RAG stacks add a cross-encoder reranking stage after retrieval and care about the quality of the *generated answer*, not just the ranking. When we add reranking and run end-to-end LLM-judge evaluation at n=200, the lifts shrink (`hybrid_diverse+rerank` over a vector baseline+rerank: NDCG@10 +0.021 [+0.007, +0.036], LLM-judge mean score +0.10) but stay statistically significant. The vector-only fusion variants (RAG-Fusion, +Diverse) collapse toward zero once a strong reranker is added. **Don't deploy on the basis of this retrieval-only table alone — the [experiments/arxiv-2603-02153-replication/](./experiments/arxiv-2603-02153-replication/README.md) writeup is the production-relevant version.**
+> **Caveat: retrieval ≠ production.** Real RAG stacks add a cross-encoder reranking stage after retrieval and care about the quality of the *generated answer*, not just the ranking. When we add reranking, the lifts shrink but stay statistically significant (`hybrid_diverse+rerank` over a vector baseline+rerank at n=200, after the parser fix: NDCG@10 +0.025 [+0.012, +0.041] with `bge-reranker-large`, +0.050 [+0.032, +0.070] with Jev). End-to-end LLM-judge scores favour fusion in all three judge runs, but significantly in only two, so treat the answer-level effect as real but small and noisy. The vector-only fusion variants (RAG-Fusion, +Diverse) collapse toward zero once a strong reranker is added. **Don't deploy on the basis of this retrieval-only table alone — the [experiments/arxiv-2603-02153-replication/](./experiments/arxiv-2603-02153-replication/README.md) writeup is the production-relevant version.**
 
 ```bash
 # Production-style comparison: candidate pool of 50, then reranked + truncated

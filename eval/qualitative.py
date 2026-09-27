@@ -17,7 +17,7 @@ from eval.dataset import download_nfcorpus, load_nfcorpus, load_into_chromadb, s
 from eval.metrics import precision_at_k, recall_at_k, ndcg_at_k, mrr
 from eval.retrieval import single_query_retrieve, with_rerank
 from eval.steelman import make_paper_pipeline, make_fuse_then_rerank
-from main import get_client
+from main import get_client, LLM_MODEL, REASONING_EFFORT
 
 
 SYSTEM_PROMPT = (
@@ -27,11 +27,12 @@ SYSTEM_PROMPT = (
 )
 
 
-def generate_answer(query, doc_texts, model="gpt-5.1-chat-latest"):
+def generate_answer(query, doc_texts, model=LLM_MODEL):
     ctx = "\n\n".join(f"[{i+1}] {t}" for i, t in enumerate(doc_texts))
     prompt = f"Question: {query}\n\nContext:\n{ctx}\n\nAnswer:"
     resp = get_client().chat.completions.create(
         model=model,
+        reasoning_effort=REASONING_EFFORT,
         messages=[
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": prompt},

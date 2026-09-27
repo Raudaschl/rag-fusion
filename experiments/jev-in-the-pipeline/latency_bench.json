@@ -1,0 +1,72 @@
+{
+  "n_queries": 30,
+  "prices_usd_per_token": {
+    "gpt-6-luna": {
+      "in": 1e-07,
+      "out": 5e-07
+    },
+    "jev": {
+      "in": 4.2e-08,
+      "out": 0.0
+    }
+  },
+  "rewrite_model": "gpt-6-luna (low)",
+  "machine": "Apple M2 Max laptop",
+  "torch_mps_available": true,
+  "retrieval": {
+    "vector_top50": {
+      "p50_ms": 80.0,
+      "p90_ms": 81.8,
+      "n": 30
+    },
+    "bm25_top50": {
+      "p50_ms": 2.2,
+      "p90_ms": 4.8,
+      "n": 30
+    },
+    "hybrid_diverse_10_lists": {
+      "p50_ms": 425.8,
+      "p90_ms": 434.8,
+      "n": 30
+    }
+  },
+  "rerank_50": {
+    "flashrank": {
+      "p50_ms": 1542.6,
+      "p90_ms": 1583.1,
+      "n": 30,
+      "device": "onnx-cpu"
+    },
+    "BAAI/bge-reranker-base": {
+      "p50_ms": 691.8,
+      "p90_ms": 711.7,
+      "n": 30,
+      "device": "mps:0"
+    },
+    "BAAI/bge-reranker-large": {
+      "p50_ms": 2162.1,
+      "p90_ms": 2178.2,
+      "n": 30,
+      "device": "mps:0"
+    },
+    "jev": {
+      "p50_ms": 341.2,
+      "p90_ms": 396.1,
+      "n": 30,
+      "input_tokens_mean": 22498,
+      "usd_per_1000_queries": 0.945
+    }
+  },
+  "rewrite_llm": {
+    "p50_ms": 1556.7,
+    "p90_ms": 1722.6,
+    "n": 15,
+    "usd_per_1000_queries": 0.055
+  },
+  "jev_router": {
+    "p50_ms": 243.4,
+    "p90_ms": 277.6,
+    "n": 15,
+    "usd_per_1000_queries": 0.0166
+  }
+}

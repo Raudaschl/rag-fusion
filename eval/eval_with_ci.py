@@ -33,6 +33,10 @@ _original_generate = main.generate_queries_chatgpt
 def _patched_generate(query, diverse=False):
     return cached_generate(qid=f"text:{query}", query=query, diverse=diverse)
 main.generate_queries_chatgpt = _patched_generate
+# eval.retrieval imported the original function before this patch ran, so patch its binding too;
+# without this, the headline table's rewrites were never cached (and could not be reproduced)
+import eval.retrieval as _retrieval  # noqa: E402
+_retrieval.generate_queries_chatgpt = _patched_generate
 
 
 def percentile(xs, p):

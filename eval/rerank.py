@@ -4,11 +4,13 @@ Models the post-retrieval stage that arxiv 2603.02153 argues absorbs fusion's re
 each method retrieves a candidate pool, the cross-encoder rescores (query, doc) pairs,
 results are truncated to top-k.
 
-Two reranker backends:
+Three reranker backends:
   - sentence-transformers CrossEncoder (default; bge-reranker-{base,large}, etc.)
   - FlashRank (the cross-encoder used in arxiv 2603.02153) — invoked when model_name
     starts with "flashrank:" (e.g. "flashrank:ms-marco-MiniLM-L-12-v2") or is the
     literal string "flashrank" (which uses FlashRank's default model).
+  - Jev (TypeSafe's decision model, hosted) — invoked when model_name is "jev". Scores
+    are calibrated P(relevant) from eval/jev.py.
 """
 
 _backend = None
@@ -21,7 +23,12 @@ def _get_backend(model_name):
     if _backend is not None and _loaded_model_name == model_name:
         return _backend
 
-    if model_name == "flashrank" or model_name.startswith("flashrank:"):
+    if model_name == "jev":
+        from eval.jev import relevance
+
+        def score(query, texts):
+            return relevance(query, texts)
+    elif model_name == "flashrank" or model_name.startswith("flashrank:"):
         from flashrank import Ranker, RerankRequest
         flash_model = (model_name.split(":", 1)[1]
                        if ":" in model_name else "ms-marco-MiniLM-L-12-v2")

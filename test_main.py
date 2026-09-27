@@ -70,3 +70,19 @@ def test_generate_output_accepts_new_params():
     output = generate_output(reranked, queries, collection=collection, original_query="test query", use_llm=False)
     assert "doc2" in output
     assert "doc1" in output
+
+
+def test_parse_queries_drops_preamble_and_blanks():
+    from main import parse_queries
+    raw = ("Here are 4 diverse search queries related to veal:\n\n"
+           "1. nutritional value of veal  \n"
+           "2) humane veal production\n"
+           "- **classic veal recipes**\n"
+           "• veal vs beef")
+    assert parse_queries(raw) == [
+        "nutritional value of veal",
+        "humane veal production",
+        "classic veal recipes",
+        "veal vs beef",
+    ]
+    assert parse_queries(raw) == parse_queries(raw.split("\n"))

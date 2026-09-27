@@ -27,3 +27,9 @@ chroma_eval_db/
 
 # OS
 .DS_Store
+
+# Explainer video source and renders (published separately, not part of the public repo)
+experiments/rankers-explainer/
+
+# Local Jev answer cache (per-run draws; not committed)
+jev_cache.json

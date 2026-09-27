@@ -1,0 +1,49 @@
+{
+  "n_queries": 200,
+  "relevant_in_pool_of_50": {
+    "single_query": 5.625,
+    "fusion": 6.295
+  },
+  "relevant_in_top10": {
+    "bge-base": {
+      "alone": 2.195,
+      "with_fusion": 2.325,
+      "gain": 0.13,
+      "share_of_pool_gain": 0.194,
+      "pool_to_top10_rate_alone": 0.39,
+      "pool_to_top10_rate_fusion": 0.369
+    },
+    "MiniLM": {
+      "alone": 2.27,
+      "with_fusion": 2.365,
+      "gain": 0.095,
+      "share_of_pool_gain": 0.142,
+      "pool_to_top10_rate_alone": 0.404,
+      "pool_to_top10_rate_fusion": 0.376
+    },
+    "bge-large": {
+      "alone": 2.375,
+      "with_fusion": 2.545,
+      "gain": 0.17,
+      "share_of_pool_gain": 0.254,
+      "pool_to_top10_rate_alone": 0.422,
+      "pool_to_top10_rate_fusion": 0.404
+    },
+    "Jev run 1": {
+      "alone": 2.765,
+      "with_fusion": 3.125,
+      "gain": 0.36,
+      "share_of_pool_gain": 0.537,
+      "pool_to_top10_rate_alone": 0.492,
+      "pool_to_top10_rate_fusion": 0.496
+    },
+    "Jev run 2": {
+      "alone": 2.765,
+      "with_fusion": 3.165,
+      "gain": 0.4,
+      "share_of_pool_gain": 0.597,
+      "pool_to_top10_rate_alone": 0.492,
+      "pool_to_top10_rate_fusion": 0.503
+    }
+  }
+}

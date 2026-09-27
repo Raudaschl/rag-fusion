@@ -168,6 +168,12 @@ def main():
     parser.add_argument("--k", type=int, nargs="+", default=[1, 3, 5, 10])
     parser.add_argument("--rerank-model", type=str, default="BAAI/bge-reranker-base")
     parser.add_argument("--out", type=str, default="./eval_steelman.json")
+    parser.add_argument("--jev-arms", action="store_true",
+                        help="Add the Jev-in-the-pipeline arms (intent-weighted fusion, its "
+                             "static 3x control, and the query-type router).")
+    parser.add_argument("--methods", type=str, nargs="+", default=None,
+                        help="Only run these methods (baseline+rerank is always included, "
+                             "it defines the buckets and the lift reference).")
     args = parser.parse_args()
 
     if not os.getenv("OPENAI_API_KEY"):
@@ -208,6 +214,19 @@ def main():
                                                     qid_lookup=qid_lookup,
                                                     rerank_model=args.rerank_model),
     }
+    if args.jev_arms:
+        from eval.jev_arms import make_hybrid_diverse_weighted, make_jev_router
+        common = dict(n_rewrites=args.n_rewrites, candidate_pool=args.candidate_pool,
+                      qid_lookup=qid_lookup, rerank_model=args.rerank_model)
+        methods["hybrid_diverse_orig3x+rerank"] = make_hybrid_diverse_weighted("orig3x", **common)
+        methods["hybrid_diverse_jevweighted+rerank"] = make_hybrid_diverse_weighted("jev", **common)
+        methods["jev_router+rerank"] = make_jev_router(**common)
+    if args.methods:
+        keep = {"baseline+rerank", *args.methods}
+        unknown = keep - set(methods)
+        if unknown:
+            raise SystemExit(f"Unknown methods: {sorted(unknown)}")
+        methods = {m: fn for m, fn in methods.items() if m in keep}
     print(f"reranker: {args.rerank_model}")
 
     print(f"Sampled {len(query_ids)} queries.")
@@ -270,6 +289,12 @@ def main():
         "metrics_scarce": {n: aggregate(per_q[n], scarce, args.k) for n in methods},
         "per_query": per_q,
     }
+    if args.jev_arms or args.rerank_model == "jev":
+        from eval.jev import JEV_MODEL, JEV_RUN
+        out["jev"] = {"model": JEV_MODEL, "run": JEV_RUN}
+    if args.jev_arms:
+        from eval.jev_arms import DECISIONS
+        out["jev"]["decisions"] = DECISIONS
     with open(args.out, "w") as f:
         json.dump(out, f, indent=2)
     print(f"\nWrote {args.out}")

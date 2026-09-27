@@ -8,7 +8,7 @@ import json
 import os
 import threading
 
-from main import generate_queries_chatgpt
+from main import generate_queries_chatgpt, parse_queries
 
 _CACHE_PATH = os.environ.get("QUERY_CACHE_PATH", "./query_cache.json")
 _cache = None
@@ -43,7 +43,9 @@ def cached_generate(qid, query, diverse=True):
     cache = _load()
     key = _serialize_key(qid, diverse)
     if key in cache:
-        return cache[key]
+        # Entries written before parse_queries existed hold raw split lines
+        # (preamble, blanks, numbering) — clean them so the same rewrites are reused.
+        return parse_queries(cache[key])
     with _lock:
         # double-check after acquiring lock
         if key in cache:

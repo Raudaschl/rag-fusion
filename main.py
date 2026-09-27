@@ -1,4 +1,5 @@
 import os
+import re
 from dotenv import load_dotenv
 from openai import OpenAI
 import chromadb
@@ -6,6 +7,10 @@ import chromadb
 load_dotenv()
 
 _client = None
+
+# One place to change the LLM used for rewrites, answers and judging.
+LLM_MODEL = os.getenv("LLM_MODEL", "gpt-6-luna")
+REASONING_EFFORT = os.getenv("LLM_REASONING_EFFORT", "low")
 
 
 def get_client():
@@ -34,11 +39,34 @@ def generate_queries_chatgpt(original_query, diverse=False):
             {"role": "user", "content": "OUTPUT (4 queries):"}
         ]
     response = get_client().chat.completions.create(
-        model="gpt-5.1-chat-latest",
+        model=LLM_MODEL,
+        reasoning_effort=REASONING_EFFORT,
         messages=messages
     )
-    generated_queries = response.choices[0].message.content.strip().split("\n")
-    return generated_queries
+    return parse_queries(response.choices[0].message.content)
+
+
+_PREAMBLE = re.compile(r"^(here (are|is)|sure[,!]|okay|below are)", re.IGNORECASE)
+_BULLET = re.compile(r"^\s*(?:[-*•–]|\d+[.)]|\(\d+\))\s*")
+
+
+def parse_queries(raw):
+    """Turn LLM output (a string, or a list of already-split lines) into clean queries.
+
+    Drops blank lines and preambles like "Here are 4 diverse search queries for X:",
+    and strips list markers and markdown emphasis. Without this, the preamble and
+    the blank line after it were fused as if they were real rewrites.
+    """
+    lines = raw.split("\n") if isinstance(raw, str) else raw
+    queries = []
+    for line in lines:
+        s = line.strip()
+        if not s or _PREAMBLE.match(s) or s.endswith(":"):
+            continue
+        s = _BULLET.sub("", s).strip().strip("*").strip().strip('"').strip()
+        if s:
+            queries.append(s)
+    return queries
 
 
 def create_collection():
@@ -122,7 +150,8 @@ def generate_output(reranked_results, queries, collection=None, original_query=N
     )
 
     response = get_client().chat.completions.create(
-        model="gpt-5.1-chat-latest",
+        model=LLM_MODEL,
+        reasoning_effort=REASONING_EFFORT,
         messages=[
             {"role": "system", "content": "You are a helpful assistant that synthesizes search results into a comprehensive answer."},
             {"role": "user", "content": prompt}
