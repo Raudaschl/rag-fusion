@@ -2,9 +2,9 @@
 
 > **Data:** every JSON referenced here lives in [`../arxiv-2603-02153-replication/results/`](../arxiv-2603-02153-replication/results/), next to the April files it corrects. Files ending `_v2` are the parser-fixed re-runs; files with `jev` in the name are new.
 
-[![How rerankers decide: a narrated, captioned walkthrough of these results (about 4.5 minutes)](video/poster.jpg)](video/rankers-explainer.mp4)
+[![Watch on YouTube: Jev as a reranker doubled RAG-Fusion's lift, a narrated, captioned walkthrough of these results (4.5 minutes)](video/poster.jpg)](https://youtu.be/SzfGTXWZf4o)
 
-*A narrated walkthrough of how the four rerankers work, what they did here, what each option costs, and why Jev helps fusion. Captions are burned in and also in [`video/rankers-explainer.srt`](video/rankers-explainer.srt).*
+*A narrated walkthrough of how the four rerankers work, what they did here, what each option costs, and why Jev helps fusion. [Watch on YouTube](https://youtu.be/SzfGTXWZf4o), or download the [MP4](video/rankers-explainer.mp4) and [captions](video/rankers-explainer.srt) from this repo.*
 
 <details>
 <summary>How the video was made</summary>
