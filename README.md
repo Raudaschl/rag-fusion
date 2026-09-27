@@ -1,5 +1,9 @@
 # RAG-Fusion: The Next Frontier of Search Technology
 
+<a href="https://youtu.be/SzfGTXWZf4o"><img src="experiments/jev-in-the-pipeline/video/preview.gif" width="720" alt="Animated preview: RAG-Fusion's NDCG@10 lift is +0.025 with bge-large and +0.050 with Jev, doubled. Click to watch the full video on YouTube."></a>
+
+▶ **[Watch the video: *Jev as a reranker doubled RAG-Fusion's lift*](https://youtu.be/SzfGTXWZf4o)** (4.5 minutes, narrated and captioned). The write-up behind it is in [`experiments/jev-in-the-pipeline/`](./experiments/jev-in-the-pipeline/README.md).
+
 ## Overview
 
 RAG-Fusion is a search methodology that aims to bridge the gap between traditional search paradigms and the multifaceted dimensions of human queries. Where Retrieval Augmented Generation (RAG) fuses vector search with generative models, RAG-Fusion goes a step further — employing multiple query generation and Reciprocal Rank Fusion to re-rank search results. The aim is to surface relevant material a single phrasing of the query would miss, particularly when the user's vocabulary doesn't match how the corpus is indexed.
@@ -11,10 +15,6 @@ For the full story behind the approach, see the article: [Forget RAG, the Future
 > Write-ups:
 > - [`experiments/jev-in-the-pipeline/`](./experiments/jev-in-the-pipeline/README.md) (September 2026): four rerankers including Jev, a decision model from TypeSafe; cost and latency per configuration; three ways of putting Jev inside fusion; a narrated explainer video; and a rewrite-parser bug found and fixed along the way.
 > - [`experiments/arxiv-2603-02153-replication/`](./experiments/arxiv-2603-02153-replication/README.md) (April 2026): the replication of arXiv [2603.02153v1](https://arxiv.org/html/2603.02153v1), with a correction note for the parser bug.
-
-<a href="https://youtu.be/SzfGTXWZf4o"><img src="experiments/jev-in-the-pipeline/video/poster.jpg" width="640" alt="Watch on YouTube: Jev as a reranker doubled RAG-Fusion's lift (4.5 minutes)"></a>
-
-▶ [Watch on YouTube: *Jev as a reranker doubled RAG-Fusion's lift*](https://youtu.be/SzfGTXWZf4o) (4.5 minutes, narrated and captioned)
 
 ## How It Works
 
