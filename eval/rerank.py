@@ -14,6 +14,9 @@ Three reranker backends:
     instead of yes/no and scores each document by its expected level.
   - Voyage (hosted) — invoked as "voyage:<model>", e.g. "voyage:rerank-3" or
     "voyage:rerank-3-lite". Scores are Voyage's relevance_score from eval/voyage.py.
+  - OpenAI Decisions API (hosted, GPT-6 Luna) — invoked as "decisions:<model>" for the yes/no
+    predicate or "decisions-score:<model>" for the four-level rubric, e.g.
+    "decisions-score:gpt-6-luna". Scores from eval/decisions.py.
 """
 
 _backend = None
@@ -42,6 +45,13 @@ def _get_backend(model_name):
 
         def score(query, texts):
             return voyage_relevance(query, texts, model=voyage_model)
+    elif model_name.startswith(("decisions:", "decisions-score:")):
+        from eval.decisions import relevance as decisions_relevance
+        prefix, decisions_model = model_name.split(":", 1)
+        kind = "score" if prefix == "decisions-score" else "predicate"
+
+        def score(query, texts):
+            return decisions_relevance(query, texts, kind=kind, model=decisions_model)
     elif model_name == "flashrank" or model_name.startswith("flashrank:"):
         from flashrank import Ranker, RerankRequest
         flash_model = (model_name.split(":", 1)[1]

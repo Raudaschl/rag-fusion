@@ -171,6 +171,10 @@ def main():
     parser.add_argument("--jev-arms", action="store_true",
                         help="Add the Jev-in-the-pipeline arms (intent-weighted fusion, its "
                              "static 3x control, and the query-type router).")
+    parser.add_argument("--conf-router", action="store_true",
+                        help="Add jev_conf_router+rerank: rewrite only when Jev's best hybrid "
+                             "document scores below --conf-threshold. Needs --rerank-model jev.")
+    parser.add_argument("--conf-threshold", type=float, default=0.5)
     parser.add_argument("--methods", type=str, nargs="+", default=None,
                         help="Only run these methods (baseline+rerank is always included, "
                              "it defines the buckets and the lift reference).")
@@ -221,6 +225,13 @@ def main():
         methods["hybrid_diverse_orig3x+rerank"] = make_hybrid_diverse_weighted("orig3x", **common)
         methods["hybrid_diverse_jevweighted+rerank"] = make_hybrid_diverse_weighted("jev", **common)
         methods["jev_router+rerank"] = make_jev_router(**common)
+    if args.conf_router:
+        if args.rerank_model != "jev":
+            raise SystemExit("--conf-router reads Jev's relevance scores; use --rerank-model jev")
+        from eval.jev_arms import make_jev_confidence_router
+        methods["jev_conf_router+rerank"] = make_jev_confidence_router(
+            methods["hybrid_diverse+rerank"], threshold=args.conf_threshold,
+            candidate_pool=args.candidate_pool, qid_lookup=qid_lookup)
     if args.methods:
         keep = {"baseline+rerank", *args.methods}
         unknown = keep - set(methods)
@@ -290,12 +301,16 @@ def main():
         "per_query": per_q,
     }
     if args.jev_arms or args.rerank_model in ("jev", "jev-score"):
-        from eval.jev import JEV_MODEL, JEV_RUN
-        out["jev"] = {"model": JEV_MODEL, "run": JEV_RUN}
+        from eval.jev import JEV_MODEL, JEV_RUN, MAX_DOCS_PER_CALL
+        out["jev"] = {"model": JEV_MODEL, "run": JEV_RUN, "max_docs_per_call": MAX_DOCS_PER_CALL}
+    if args.rerank_model.startswith(("decisions:", "decisions-score:")):
+        from eval.decisions import DECISIONS_RUN, MAX_DOCS_PER_CALL as DECISIONS_MAX_DOCS
+        out["decisions_api"] = {"model": args.rerank_model, "run": DECISIONS_RUN,
+                                "max_docs_per_call": DECISIONS_MAX_DOCS}
     if args.rerank_model.startswith("voyage:"):
         from eval.voyage import VOYAGE_RUN
         out["voyage"] = {"model": args.rerank_model.split(":", 1)[1], "run": VOYAGE_RUN}
-    if args.jev_arms:
+    if args.jev_arms or args.conf_router:
         from eval.jev_arms import DECISIONS
         out["jev"]["decisions"] = DECISIONS
     with open(args.out, "w") as f:

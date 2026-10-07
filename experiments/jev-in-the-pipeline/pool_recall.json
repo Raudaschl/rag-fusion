@@ -44,6 +44,22 @@
       "share_of_pool_gain": 0.597,
       "pool_to_top10_rate_alone": 0.492,
       "pool_to_top10_rate_fusion": 0.503
+    },
+    "Luna score": {
+      "alone": 2.695,
+      "with_fusion": 3.01,
+      "gain": 0.315,
+      "share_of_pool_gain": 0.47,
+      "pool_to_top10_rate_alone": 0.479,
+      "pool_to_top10_rate_fusion": 0.478
+    },
+    "Luna predicate": {
+      "alone": 2.66,
+      "with_fusion": 3.01,
+      "gain": 0.35,
+      "share_of_pool_gain": 0.522,
+      "pool_to_top10_rate_alone": 0.473,
+      "pool_to_top10_rate_fusion": 0.478
     }
   }
 }

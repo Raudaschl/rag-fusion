@@ -36,3 +36,6 @@ jev_cache.json
 
 # Local Voyage rerank cache (per-run draws; not committed)
 voyage_cache.json
+
+# Local OpenAI Decisions API cache (per-run draws; not committed)
+decisions_cache*.json

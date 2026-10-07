@@ -26,9 +26,12 @@ _CACHE_PATH = os.getenv("JEV_CACHE_PATH", "./jev_cache.json")
 JEV_TIMEOUT = float(os.getenv("JEV_TIMEOUT", "0")) or None
 
 # TypeSafe documents 30 documents per call as the tested batch size and a ~64k-token
-# request budget; keep well under it.
-MAX_DOCS_PER_CALL = 30
-MAX_STATE_CHARS = 100_000
+# request budget; keep well under it. JEV_MAX_DOCS raises the per-call cap to test sending a
+# whole pool in one call (S1Rank, github.com/zaesho/S1Rank, found one 100-document call beat
+# chunked calls). Non-default caps get their own cache kind so 30-document draws stay valid.
+MAX_DOCS_PER_CALL = int(os.getenv("JEV_MAX_DOCS", "30"))
+MAX_STATE_CHARS = int(os.getenv("JEV_MAX_STATE_CHARS", "100000"))
+_BATCH_TAG = "" if MAX_DOCS_PER_CALL == 30 else f"@{MAX_DOCS_PER_CALL}"
 
 RELEVANCE_QUESTION = ("Document `documents.{id}` is relevant to `query`: it contains information "
                       "that answers or directly addresses it.")
@@ -168,7 +171,7 @@ def relevance(query, texts):
                 out[i] = s
         return out
 
-    return _cached("relevance", {"q": query, "t": texts}, compute)
+    return _cached("relevance" + _BATCH_TAG, {"q": query, "t": texts}, compute)
 
 
 def _expected_level(answer):
@@ -208,7 +211,7 @@ def relevance_score(query, texts):
                 out[i] = s
         return out
 
-    return _cached("relevance_score", {"q": query, "t": texts}, compute)
+    return _cached("relevance_score" + _BATCH_TAG, {"q": query, "t": texts}, compute)
 
 
 def intent_weights(query, variants):

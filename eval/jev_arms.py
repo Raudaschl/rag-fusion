@@ -5,6 +5,10 @@
                                        each rewrite's lists are weighted by Jev's P(keeps intent)
   - jev_router+rerank:                 Jev classifies the query; fuse only when it is broad or
                                        multi-faceted, otherwise run hybrid+rerank (no LLM rewrites)
+  - jev_conf_router+rerank:           run hybrid → Jev first; rewrite and fuse (hybrid_diverse)
+                                       only when Jev's best document scores below a threshold.
+                                       Cost-aware routing from arXiv 2609.05637, gated on
+                                       retrieval confidence instead of query type
   - with_jev_gate:                     after retrieval, if Jev gives every top-k document
                                        P(relevant) below a threshold, return nothing so the
                                        synthesizer abstains ("evidence is thin")
@@ -14,10 +18,11 @@ Every Jev decision is recorded in DECISIONS so runs can report weights, routes a
 
 from eval.jev import intent_weights, query_kind, relevance
 from eval.query_cache import cached_generate
+from eval.rerank import _fetch_doc_texts
 from eval.retrieval import bm25_search, with_rerank
 from main import reciprocal_rank_fusion, vector_search
 
-DECISIONS = {"intent": {}, "route": {}, "gate": {}}
+DECISIONS = {"intent": {}, "route": {}, "gate": {}, "conf_route": {}}
 
 FUSE_KINDS = ("broad", "multi_faceted")
 
@@ -68,6 +73,28 @@ def make_jev_router(n_rewrites=4, candidate_pool=50, qid_lookup=None,
         fused = reciprocal_rank_fusion(_hybrid_lists(queries, collection, k), verbose=False)
         return list(fused.keys())[:k]
     return with_rerank(base, candidate_pool=candidate_pool, model_name=rerank_model)
+
+
+def make_jev_confidence_router(fuse_fn, threshold=0.5, candidate_pool=50, qid_lookup=None):
+    """hybrid → Jev rerank; if Jev's best document has P(relevant) < threshold, return
+    fuse_fn's result instead (the hybrid_diverse+rerank arm). The hybrid pool and its scores
+    are the same request hybrid+rerank makes, so with Jev as reranker they come from cache and
+    the confident path costs nothing extra. Every query's signal is recorded, so thresholds
+    can be swept offline from the two arms' per-query results."""
+    def retrieve(query, collection, k=10):
+        qid = qid_lookup.get(query) if qid_lookup else query
+        pool = max(candidate_pool, k)
+        fused = reciprocal_rank_fusion(_hybrid_lists([query], collection, pool), verbose=False)
+        candidates = list(fused.keys())[:pool]
+        scores = relevance(query, _fetch_doc_texts(candidates, collection))
+        ranked = sorted(zip(candidates, scores), key=lambda x: x[1], reverse=True)
+        top = ranked[0][1] if ranked else 0.0
+        fuse = top < threshold
+        DECISIONS["conf_route"][qid] = {"max_relevance": top, "fused": fuse}
+        if fuse:
+            return fuse_fn(query, collection, k=k)
+        return [d for d, _ in ranked[:k]]
+    return retrieve
 
 
 def with_jev_gate(method_fn, threshold=0.5, qid_lookup=None):

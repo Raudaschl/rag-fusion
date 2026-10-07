@@ -24,6 +24,8 @@ RUNS = {
     "bge-large": "steelman_large_n200_v2.json",
     "Jev run 1": "steelman_jev_n200_run1.json",
     "Jev run 2": "steelman_jev_n200_run2.json",
+    "Luna score": "../../openai-decisions-api/results/steelman_decisions_score_n200_run1.json",
+    "Luna predicate": "../../openai-decisions-api/results/steelman_decisions_predicate_n200_run1.json",
 }
 
 

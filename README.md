@@ -10,10 +10,11 @@ RAG-Fusion is a search methodology that aims to bridge the gap between tradition
 
 For the full story behind the approach, see the article: [Forget RAG, the Future is RAG-Fusion](https://adrianraudaschl.com/blog/forget-rag-the-future-is-rag-fusion/).
 
-> **Where this technique fits, in one line:** Properly configured RAG-Fusion (`hybrid_diverse+rerank`: BM25 + vector for the original query and LLM rewrites, fused via RRF, then reranked) reliably improves retrieval after reranking, on every reranker tested, and most of all with the strongest one: +0.025 NDCG@10 with `bge-reranker-large`, +0.050 with Jev (n=200, 95% CIs excluding zero). Its effect on the generated answer is positive but noisy: fusion won more LLM-judge comparisons than it lost in all three judge runs, and significantly in two. The vector-only fusion variant is roughly a wash once a reranker is added. If you deploy fusion, deploy the hybrid variant and put your strongest reranker behind it.
+> **Where this technique fits, in one line:** Properly configured RAG-Fusion (`hybrid_diverse+rerank`: BM25 + vector for the original query and LLM rewrites, fused via RRF, then reranked) reliably improves retrieval after reranking, on every reranker tested, and most of all with the strongest one: +0.025 NDCG@10 with `bge-reranker-large`, +0.037 to +0.039 with OpenAI's Decisions API, +0.050 with Jev (n=200, 95% CIs excluding zero). Its effect on the generated answer is positive but noisy: fusion won more LLM-judge comparisons than it lost in all three judge runs, and significantly in two. The vector-only fusion variant is roughly a wash once a reranker is added. If you deploy fusion, deploy the hybrid variant and put your strongest reranker behind it.
 >
 > Write-ups:
 > - [`experiments/jev-in-the-pipeline/`](./experiments/jev-in-the-pipeline/README.md) (September 2026): four rerankers including Jev, a decision model from TypeSafe; cost and latency per configuration; three ways of putting Jev inside fusion; a narrated explainer video; and a rewrite-parser bug found and fixed along the way.
+> - [`experiments/openai-decisions-api/`](./experiments/openai-decisions-api/README.md) (October 2026): OpenAI's Decisions API (GPT-6 Luna) as a reranker, a second decision model alongside Jev. Summarised in section 8 of the Jev write-up.
 > - [`experiments/arxiv-2603-02153-replication/`](./experiments/arxiv-2603-02153-replication/README.md) (April 2026): the replication of arXiv [2603.02153v1](https://arxiv.org/html/2603.02153v1), with a correction note for the parser bug.
 
 ## How It Works
@@ -74,7 +75,7 @@ For mixed workloads, routing is the obvious idea: run hybrid+rerank on every que
 │   ├── dataset.py          # NFCorpus download & loading
 │   ├── metrics.py          # IR metrics (Precision, Recall, NDCG, MRR)
 │   ├── retrieval.py        # Retrieval methods (BM25, vector, hybrid, RAG-Fusion variants)
-│   ├── rerank.py           # Reranking stage: cross-encoders, FlashRank, or Jev
+│   ├── rerank.py           # Reranking stage: cross-encoders, FlashRank, Jev or OpenAI's Decisions API
 │   ├── query_cache.py      # Disk-persisted cache for LLM query rewrites
 │   ├── sweep.py            # Pool-size and N-rewrites sweep driver
 │   ├── steelman.py         # Pipeline-ordering / truncation / difficulty tests
@@ -84,12 +85,15 @@ For mixed workloads, routing is the obvious idea: run hybrid+rerank on every que
 │   ├── saved_queries.py    # "Saved queries" metric (kohlrabi-class binary recovery)
 │   ├── eval_with_ci.py     # Retrieval-only headline table with paired-bootstrap CIs
 │   ├── jev.py              # Jev client: relevance, intent and query-type calls, cached per run
-│   ├── jev_arms.py         # Jev inside fusion: intent-weighted RRF, query-type router, evidence gate
+│   ├── jev_arms.py         # Jev inside fusion: intent-weighted RRF, routers, evidence gate
+│   ├── decisions.py        # OpenAI Decisions API client (GPT-6 Luna): relevance as yes/no or rubric
+│   ├── conf_router_sweep.py # Threshold sweep for the confidence router, with a permutation test
 │   ├── latency_bench.py    # Per-piece latency and cost benchmark
 │   └── pool_recall.py      # Relevant documents in the pool vs in each reranker's top 10
 ├── experiments/
 │   ├── arxiv-2603-02153-replication/  # April replication write-up + all raw results
-│   └── jev-in-the-pipeline/           # September write-up, benchmarks and explainer video
+│   ├── jev-in-the-pipeline/           # September write-up, benchmarks and explainer video
+│   └── openai-decisions-api/          # October: OpenAI's Decisions API as a reranker
 └── .env.example            # Environment template
 ```
 
