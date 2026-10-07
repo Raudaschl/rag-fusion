@@ -289,9 +289,12 @@ def main():
         "metrics_scarce": {n: aggregate(per_q[n], scarce, args.k) for n in methods},
         "per_query": per_q,
     }
-    if args.jev_arms or args.rerank_model == "jev":
+    if args.jev_arms or args.rerank_model in ("jev", "jev-score"):
         from eval.jev import JEV_MODEL, JEV_RUN
         out["jev"] = {"model": JEV_MODEL, "run": JEV_RUN}
+    if args.rerank_model.startswith("voyage:"):
+        from eval.voyage import VOYAGE_RUN
+        out["voyage"] = {"model": args.rerank_model.split(":", 1)[1], "run": VOYAGE_RUN}
     if args.jev_arms:
         from eval.jev_arms import DECISIONS
         out["jev"]["decisions"] = DECISIONS

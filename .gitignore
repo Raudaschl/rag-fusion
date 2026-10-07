@@ -33,3 +33,6 @@ experiments/rankers-explainer/
 
 # Local Jev answer cache (per-run draws; not committed)
 jev_cache.json
+
+# Local Voyage rerank cache (per-run draws; not committed)
+voyage_cache.json

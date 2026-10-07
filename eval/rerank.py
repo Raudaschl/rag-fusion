@@ -10,7 +10,10 @@ Three reranker backends:
     starts with "flashrank:" (e.g. "flashrank:ms-marco-MiniLM-L-12-v2") or is the
     literal string "flashrank" (which uses FlashRank's default model).
   - Jev (TypeSafe's decision model, hosted) — invoked when model_name is "jev". Scores
-    are calibrated P(relevant) from eval/jev.py.
+    are calibrated P(relevant) from eval/jev.py. "jev-score" asks the four-level rubric
+    instead of yes/no and scores each document by its expected level.
+  - Voyage (hosted) — invoked as "voyage:<model>", e.g. "voyage:rerank-3" or
+    "voyage:rerank-3-lite". Scores are Voyage's relevance_score from eval/voyage.py.
 """
 
 _backend = None
@@ -28,6 +31,17 @@ def _get_backend(model_name):
 
         def score(query, texts):
             return relevance(query, texts)
+    elif model_name == "jev-score":
+        from eval.jev import relevance_score
+
+        def score(query, texts):
+            return relevance_score(query, texts)
+    elif model_name.startswith("voyage:"):
+        from eval.voyage import relevance as voyage_relevance
+        voyage_model = model_name.split(":", 1)[1]
+
+        def score(query, texts):
+            return voyage_relevance(query, texts, model=voyage_model)
     elif model_name == "flashrank" or model_name.startswith("flashrank:"):
         from flashrank import Ranker, RerankRequest
         flash_model = (model_name.split(":", 1)[1]

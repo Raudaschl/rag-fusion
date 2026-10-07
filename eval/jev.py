@@ -21,6 +21,9 @@ from concurrent.futures import ThreadPoolExecutor
 JEV_MODEL = os.getenv("JEV_MODEL", "jev-latest")
 JEV_RUN = os.getenv("JEV_RUN", "1")
 _CACHE_PATH = os.getenv("JEV_CACHE_PATH", "./jev_cache.json")
+# Per-request timeout in seconds. The SDK default (10 s) suits the hosted API; a local
+# System One server (e.g. decider via TYPESAFE_BASE_URL) can need much longer per call.
+JEV_TIMEOUT = float(os.getenv("JEV_TIMEOUT", "0")) or None
 
 # TypeSafe documents 30 documents per call as the tested batch size and a ~64k-token
 # request budget; keep well under it.
@@ -33,6 +36,15 @@ RELEVANCE_CRITERIA = {
     "true": "The document contains information that answers the query or directly addresses what it asks about.",
     "false": "The document is only loosely related, on a similar topic, or does not address what the query asks.",
 }
+
+# Four-level rubric, worded as in anessbelbati/jev-rerank-bench (rerankers/systemone.py,
+# JevScoreBatch), where it scored 0.692 nDCG@10 against 0.685 for 30 yes/no questions.
+SCORE_QUESTION = ("How well does document `documents.{id}` supply the information needed to "
+                  "answer or verify `query`?")
+SCORE_RUBRIC = ["The passage is off-topic for the query.",
+                "The passage is on a related topic but does not supply what the query asks for.",
+                "The passage partly supplies the information needed to answer or verify the query.",
+                "The passage fully supplies the information needed to answer or verify the query."]
 
 INTENT_QUESTION = ("Search variant `variants.{id}` keeps the intent of `query`: searching for it would "
                    "find material that helps answer what the user asked.")
@@ -64,8 +76,9 @@ def _get_client():
         api_key = os.getenv("JEV_API_KEY") or os.getenv("TYPESAFE_API_KEY")
         if not api_key:
             raise Exception("No Jev API key found. Set JEV_API_KEY in .env.")
-        _client = TypeSafeClient(api_key=api_key,
-                                 retry=RetryPolicy(max_retries=6, backoff_max=30.0, timeout=90.0))
+        _client = TypeSafeClient(api_key=api_key, timeout=JEV_TIMEOUT,
+                                 retry=RetryPolicy(max_retries=6, backoff_max=30.0,
+                                                   timeout=max(90.0, JEV_TIMEOUT or 0)))
     return _client
 
 
@@ -156,6 +169,46 @@ def relevance(query, texts):
         return out
 
     return _cached("relevance", {"q": query, "t": texts}, compute)
+
+
+def _expected_level(answer):
+    """Expected rubric level scaled to 0..1 (0 = off-topic, 1 = fully supplies)."""
+    legend, probs = dict(answer.legend or {}), dict(answer.probabilities or {})
+    if legend and probs:
+        def level(k):
+            text = legend[k]
+            return SCORE_RUBRIC.index(text) if text in SCORE_RUBRIC else int(k)
+        return sum(p * level(k) for k, p in probs.items()) / (len(SCORE_RUBRIC) - 1)
+    return float(answer.score)
+
+
+def _score_batch(items, query):
+    """One Jev call: a four-level Score question per document. Returns 0..1 in order."""
+    from typesafe_sdk import Score
+    ids = [f"D{j:02d}" for j in range(len(items))]
+    state = {"query": query, "documents": dict(zip(ids, items))}
+    questions = {i: Score(instructions=SCORE_QUESTION.format(id=i), criteria=SCORE_RUBRIC)
+                 for i in ids}
+    r = _get_client().system_one(state=state, questions=questions, model=JEV_MODEL)
+    return [_expected_level(r.answers[i]) for i in ids]
+
+
+def relevance_score(query, texts):
+    """Expected rubric level (0..1) per text, batched like relevance()."""
+    if not texts:
+        return []
+
+    def compute():
+        batches = list(_chunks(texts))
+        with ThreadPoolExecutor(4) as ex:
+            parts = list(ex.map(lambda idx: _score_batch([texts[i] for i in idx], query), batches))
+        out = [0.0] * len(texts)
+        for idx, part in zip(batches, parts):
+            for i, s in zip(idx, part):
+                out[i] = s
+        return out
+
+    return _cached("relevance_score", {"q": query, "t": texts}, compute)
 
 
 def intent_weights(query, variants):
