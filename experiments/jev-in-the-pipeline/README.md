@@ -236,7 +236,7 @@ A few other things from the runs:
 - **Hybrid on its own adds little under either newcomer:** -0.002 and -0.010 under Luna, +0.007 and +0.009 under Microsoft-Decision-1, none of it significant. Luna is the only reranker where it comes out below zero, against +0.003 to +0.015 for the others, but that may well be noise.
 - **The yes/no and rubric questions come out the same** for both newcomers, as they did for Jev. Luna's probabilities come back rounded to two decimals and are close to binary (two to six distinct values in a pool of 50), so most of a pool ties and keeps its retrieval order; on NFCorpus that cost nothing I could measure. Microsoft-Decision-1's scores are much finer-grained.
 - **Luna is deterministic.** Two identical calls gave identical scores, where Jev moves 48% of its scores between calls. Microsoft-Decision-1 wobbles about as much as Jev: in a three-query probe most scores moved, by 0.03 at most.
-- **Cost.** Microsoft-Decision-1 is priced the same as Jev, so it should come to about $0.95 per 1,000 queries to rerank 50 abstracts. Luna costs about $2.50, assuming its standard $0.10 per million input tokens applies; OpenAI hasn't published a separate price, and the API is still in limited preview.
+- **Cost.** Microsoft-Decision-1 is priced the same as Jev, so it should come to about $0.95 per 1,000 queries to rerank 50 abstracts. Luna costs about $2.50, at the $0.10 per million input tokens OpenAI set for the Decisions API when it opened the public beta on 6 October ([OpenAI's public-beta announcement](https://community.openai.com/t/decisions-api-is-now-available-in-public-beta/1403877)). There's no output charge and no caching.
 
 ## What I'd take from this
 

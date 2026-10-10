@@ -6,7 +6,8 @@ The code is [`eval/decisions.py`](../../eval/decisions.py).
 
 ## What it is, and why test it
 
-OpenAI announced the Decisions API at DevDay on 29 September 2026. It runs on GPT-6 Luna. You send one input
+OpenAI announced the Decisions API at DevDay on 29 September 2026 and opened it as a public beta to all
+developers on 6 October. It runs on GPT-6 Luna. You send one input
 string and a list of questions with fixed answers, and each comes back as a `predicate` (a probability), a
 `choice`, a `score` (an expected level over levels you label), or a `refusal`. There's no generated text.
 
@@ -95,8 +96,8 @@ gradient that decision models sit high on than a clean split. Section 8 of the J
 
 ## Cost
 
-OpenAI hasn't published a separate price for the Decisions API. At GPT-6 Luna's standard input rate of
-$0.10 per million tokens, the rubric run used 30.0M input tokens (about $3.00) and the yes/no run 36.4M
+OpenAI's price for the Decisions API is $0.10 per million input tokens, with no charge for output and no
+caching (so no cache discount either), per [OpenAI's public-beta announcement](https://community.openai.com/t/decisions-api-is-now-available-in-public-beta/1403877) of 6 October. At that rate the rubric run used 30.0M input tokens (about $3.00) and the yes/no run 36.4M
 (about $3.64, including pools scored again after the timeout restart). That's about $2.50 per 1,000
 queries to rerank 50 abstracts, against about $0.95 for Jev.
 
@@ -108,7 +109,7 @@ queries to rerank 50 abstracts, against about $0.95 for Jev.
   touch the comparisons above.
 - The Jev runs are from 26 and 27 September (`jev-1.13.0`) and the Luna runs from 7 October. Jev's two runs
   agree within noise, so I haven't re-run it.
-- The API is in limited preview, so the model, price and rounding could all change.
+- The API is in public beta, so the model, price and rounding could all change.
 
 ## Reproduce
 
@@ -120,6 +121,6 @@ python -m eval.steelman --sample 200 --rerank-model decisions:gpt-6-luna \
 python -m eval.bootstrap_ci experiments/openai-decisions-api/results/steelman_decisions_score_n200_run1.json
 ```
 
-Needs `OPENAI_API_KEY` in `.env` and preview access to the Decisions API. Answers are cached locally in
+Needs `OPENAI_API_KEY` in `.env` and access to the Decisions API (public beta since 6 October). Answers are cached locally in
 `decisions_cache.json` (not committed). The client calls the endpoint over plain HTTP, because openai
 SDK versions before 3.26.0 don't include it.

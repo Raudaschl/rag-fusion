@@ -17,9 +17,8 @@ request and response shapes follow openai 3.26.0's resources/decisions.py.
 
 Answers are cached on disk keyed by DECISIONS_RUN. Two identical calls returned identical
 scores in a probe (2026-10-07), so one run per configuration is enough; a second run only
-re-checks that. Usage per call is kept so cost can be summed. OpenAI publishes no separate
-Decisions price; GPT-6 Luna's standard rate is $0.10 per million input tokens, and decision
-calls report zero output tokens.
+re-checks that. Usage per call is kept so cost can be summed. Price, per OpenAI's public-beta
+announcement (6 Oct 2026): $0.10 per million input tokens, no output charge, no caching.
 """
 
 import atexit
