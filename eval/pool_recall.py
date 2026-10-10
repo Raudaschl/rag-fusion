@@ -26,6 +26,8 @@ RUNS = {
     "Jev run 2": "steelman_jev_n200_run2.json",
     "Luna score": "../../openai-decisions-api/results/steelman_decisions_score_n200_run1.json",
     "Luna predicate": "../../openai-decisions-api/results/steelman_decisions_predicate_n200_run1.json",
+    "MSD1 yes/no": "../../microsoft-decision-1/results/steelman_msd1_yesno_n200_run1.json",
+    "MSD1 rubric": "../../microsoft-decision-1/results/steelman_msd1_rubric_n200_run1.json",
 }
 
 

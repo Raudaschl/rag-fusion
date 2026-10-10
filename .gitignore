@@ -39,3 +39,6 @@ voyage_cache.json
 
 # Local OpenAI Decisions API cache (per-run draws; not committed)
 decisions_cache*.json
+
+# Local Microsoft-Decision-1 caches via OpenRouter (per-run draws; not committed)
+msd1_cache*.json

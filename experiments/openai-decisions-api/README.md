@@ -36,6 +36,7 @@ NDCG@10, with 95% paired-bootstrap CIs on the lift. Bold means the CI excludes z
 | bge-reranker-large | 0.331 | +0.012 | **+0.025** [+0.012, +0.041] |
 | Luna, rubric | 0.370 | -0.002 [-0.021, +0.017] | **+0.037** [+0.014, +0.062] |
 | Luna, yes/no | 0.373 | -0.010 [-0.031, +0.011] | **+0.039** [+0.019, +0.061] |
+| Microsoft-Decision-1, yes/no / rubric | 0.378 / 0.378 | +0.007 / +0.009 (n.s.) | **+0.038 / +0.035** |
 | Jev, yes/no (run 1 / run 2) | 0.382 / 0.384 | +0.015 / +0.013 | **+0.050 / +0.052** |
 | Jev, rubric | 0.388 | +0.010 | **+0.050** |
 
@@ -58,13 +59,16 @@ write-up (`eval/pool_recall.py`, output in [`../jev-in-the-pipeline/pool_recall.
 | bge-large | 2.38 | 2.55 | 25% | 42% to 40% |
 | Luna, rubric | 2.70 | 3.01 | 47% | 48% to 48% |
 | Luna, yes/no | 2.66 | 3.01 | 52% | 47% to 48% |
+| Microsoft-Decision-1, yes/no / rubric | 2.72 / 2.75 | 2.97 / 3.00 | 37% | 48% to 47%, 49% to 48% |
 | Jev (run 1 / run 2) | 2.77 | 3.13 / 3.17 | 54% / 60% | 49% to 50% |
 
 This is the result I was looking for. Every cross-encoder gets a little worse at picking relevant documents
-out of the wider fusion pool, and both decision models don't. Luna moves about half of fusion's extra finds
-into its top ten, close to Jev and about twice what bge-large manages. In the Jev write-up I called the
-explanation interpretation rather than something I'd measured. It's still two models on one corpus, but it
-now looks like a property of decision models rather than of one product.
+out of the wider fusion pool, and Luna doesn't. It moves about half of fusion's extra finds into its top ten,
+close to Jev and about twice what bge-large manages. When I first published this, with Luna as the only
+second decision model, I said it now looked like a property of decision models rather than of one product.
+Microsoft-Decision-1, added on 10 October, makes that less tidy: it moves 37% of the extra finds and slips by
+a point on the wider pool, partway between the cross-encoders and Luna and Jev. So it looks more like a
+gradient that decision models sit high on than a clean split. Section 8 of the Jev write-up covers all three.
 
 ### Other things worth knowing
 
@@ -72,8 +76,9 @@ now looks like a property of decision models rather than of one product.
   n.s., against +0.037 and +0.039 for fusing first. That fits the pattern from section 3 of the Jev
   write-up, where reranking each list first stops helping as the reranker gets stronger. The paper's ordering
   without BM25 (vector only, four rewrites) hurts outright: -0.023 and -0.036, both significant.
-- **Hybrid on its own does nothing under Luna,** where it adds +0.010 to +0.015 under Jev and the
-  cross-encoders. I don't know why yet.
+- **Hybrid on its own does nothing under Luna** (n.s.). Luna is the only reranker where it comes out
+  below zero, against +0.003 to +0.015 for the others, but none of the decision models' hybrid lifts are
+  significant (Microsoft-Decision-1 gets +0.007 and +0.009), so it may well be noise.
 - **Yes/no and rubric come out the same.** Arm by arm the differences are within ±0.006 and every CI spans zero.
   The yes/no probabilities come back rounded to two decimals and are close to binary (two to six distinct
   values in a pool of 50), so most of a pool ties and keeps its retrieval order. On NFCorpus that cost
@@ -101,8 +106,8 @@ queries to rerank 50 abstracts, against about $0.95 for Jev.
   scores. Retrieval isn't quite: Chroma's HNSW index returns a different top 50 for about 29% of queries
   each time it's loaded. After reranking, that moved NDCG@10 by at most 0.0005 in a bge test, so it doesn't
   touch the comparisons above.
-- The Jev runs are from 26 and 27 September (`jev-1.13.0`) and the Luna runs from 7 October. A same-day run
-  of both would make the head-to-head cleaner.
+- The Jev runs are from 26 and 27 September (`jev-1.13.0`) and the Luna runs from 7 October. Jev's two runs
+  agree within noise, so I haven't re-run it.
 - The API is in limited preview, so the model, price and rounding could all change.
 
 ## Reproduce

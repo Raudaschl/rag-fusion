@@ -15,7 +15,7 @@ Every frame is drawn by code: an SVG scene that's a pure function of time, stepp
 
 **TL;DR.** I set out to test whether Jev, TypeSafe's decision model, improves RAG-Fusion at the points a reranker can't reach. I found a bug in my own harness on the way, fixed it, and re-ran April's replication before testing anything new. The retrieval conclusions from April survive the fix. Jev turns out to be the strongest reranker I've tested on NFCorpus, and fusion's lift roughly doubles under it (+0.050 NDCG@10, replicated across two runs), which is the opposite of what "stronger rerankers absorb fusion" predicts. The ideas that put Jev *inside* fusion did much less: intent-weighting the rewrites changed nothing measurable, a query-type router saved about a fifth of the rewrite calls at no detectable cost, and an evidence gate moved answer quality from rich queries to scarce ones without improving it overall. The answer-level evidence for fusion itself is weaker and noisier than I claimed in April.
 
-> **Update, 7 October 2026.** OpenAI's new Decisions API, a second decision model, lands between bge-large and Jev both on its own (0.370 to 0.373) and in fusion's lift (+0.037 to +0.039). It also copes with the wider fusion pool the way Jev does and the cross-encoders don't. See [section 8](#8-a-second-decision-model-openais-decisions-api).
+> **Update, 10 October 2026.** Two more decision models, OpenAI's Decisions API and Microsoft-Decision-1, land close to Jev on their own (0.370 to 0.378) but get less from fusion (+0.035 to +0.039, against Jev's +0.050). Both get more from it than any cross-encoder. See [section 8](#8-two-more-decision-models-openais-decisions-api-and-microsoft-decision-1).
 
 Where Jev went into the pipeline, and what each placement did:
 
@@ -207,34 +207,36 @@ If I were deploying this today, I'd make hybrid retrieval into Jev the default, 
 
 The thing I haven't measured is whether Jev with fusion produces better *answers* than Jev alone. Every judge run in section 5 used bge-large retrievals, and given how noisy those runs were, settling it needs repeated judge runs, ideally with a judge from a different model family. That's the next experiment.
 
-## 8. A second decision model: OpenAI's Decisions API
+## 8. Two more decision models: OpenAI's Decisions API and Microsoft-Decision-1
 
-*Added 7 October 2026.*
+*Added 7 October 2026 with OpenAI's Decisions API; Microsoft-Decision-1 added 10 October.*
 
-Two weeks after Jev came out, OpenAI announced a Decisions API at DevDay (29 September). It runs on GPT-6 Luna, and the shape will look familiar: you send some context and a list of questions with fixed answers, and you get a probability back for each one instead of generated text. TypeSafe calls this kind of model a System One model, after Kahneman's fast, automatic kind of thinking. OpenAI doesn't use the term, but the contract is the same, so I'll call them both decision models here. Neither was trained as a reranker, which is what made the second one worth testing. If what Jev did in section 2 comes from being a decision model rather than from something particular to Jev, Luna should do it too.
+Two weeks after Jev came out, OpenAI announced a Decisions API at DevDay (29 September), and ten days after that Microsoft released Microsoft-Decision-1. The shape is the same in all three: you send some context and a list of questions with fixed answers, and you get a probability back for each one instead of generated text. TypeSafe calls this kind of model a System One model, after Kahneman's fast, automatic kind of thinking. OpenAI doesn't use the term, but Microsoft's model speaks TypeSafe's request format exactly, so I'll call all three decision models here. None of them was trained as a reranker, which is what made the newcomers worth testing. If what Jev did in section 2 comes from being a decision model rather than from something particular to Jev, the others should do it too.
 
-I asked Luna the same two kinds of question I'd asked Jev, on the same 200 queries and the same arms: the yes/no "is this document relevant?" question, and the four-level rubric from Jev's Score mode. All 50 candidates go in one request. What each call costs and how the API behaves are in [`../openai-decisions-api/`](../openai-decisions-api/README.md).
+OpenAI's runs on GPT-6 Luna, and all 50 candidates go in one request. Microsoft-Decision-1 is post-trained from Qwen3.5-9B, sold at Jev's price ($0.042 per million input tokens), and I called it through OpenRouter with the same client and the same 30-document batches I used for Jev. I asked both the same two kinds of question I'd asked Jev, on the same 200 queries and the same arms: the yes/no "is this document relevant?" question, and the four-level rubric from Jev's Score mode. The details are in [`../openai-decisions-api/`](../openai-decisions-api/README.md) and [`../microsoft-decision-1/`](../microsoft-decision-1/README.md).
 
 | Reranker | Baseline | Fusion lift (95% CI) | Share of fusion's extra finds reaching the top 10 | Hit rate on the pool, alone to fusion |
 |---|---|---|---|---|
 | bge-large | 0.331 | **+0.025** [+0.012, +0.041] | 25% | 42% to 40% |
 | Luna, rubric | 0.370 | **+0.037** [+0.014, +0.062] | 47% | 48% to 48% |
 | Luna, yes/no | 0.373 | **+0.039** [+0.019, +0.061] | 52% | 47% to 48% |
+| Microsoft-Decision-1, yes/no | 0.378 | **+0.038** [+0.019, +0.059] | 37% | 48% to 47% |
+| Microsoft-Decision-1, rubric | 0.378 | **+0.035** [+0.016, +0.056] | 37% | 49% to 48% |
 | Jev, run 1 / run 2 | 0.382 / 0.384 | **+0.050 / +0.052** | 54% / 60% | 49% to 50% |
 
-Luna lands between bge-large and Jev on its own, and fusion's lift lands between them too, so the ordering from section 2 holds with a third model from a third company. Three points with overlapping intervals don't make a law, but they keep pointing the same way.
+On their own, the three decision models are close together. Microsoft-Decision-1 is within noise of both Luna and Jev on the single-query baseline, and all three are well clear of bge-large. Fusion separates them: Jev is ahead of both newcomers by 0.016 to 0.030 NDCG@10 with fusion (the CIs exclude zero against all three Jev runs), and Luna and Microsoft-Decision-1 tie each other there.
 
-The last two columns are the part I care about most. In section 2 I guessed that Jev copes with the wider fusion pool because it reads the query and each document as a question to answer, and I said that was interpretation rather than something I'd measured. Luna behaves the same way. About half of fusion's extra relevant documents reach its top ten, against a quarter or less for the cross-encoders, and it picks relevant documents out of the fusion pool as accurately as out of a single-query pool, where every cross-encoder gets slightly worse. It's still two models on one corpus, so this isn't proof, but it now looks like a property of decision models rather than of one product.
+When I first wrote this section, with only Luna to go on, I said that coping with the wider fusion pool now looked like a property of decision models rather than of one product. Microsoft-Decision-1 makes that less tidy. It moves 37% of fusion's extra relevant documents into its top ten, which is more than any cross-encoder (14% to 25%) but well short of Luna and Jev (47% to 60%), and its hit rate on the pool slips by a point when fusion widens it, where Luna and Jev hold steady and the cross-encoders lose two or three. So with three decision models it looks less like a clean split between two kinds of model and more like a gradient that decision models sit high on, with Jev at the top of it. The same goes for section 2's ordering: every decision model gets more out of fusion than every cross-encoder, but among the decision models the lift doesn't follow baseline strength neatly, since Microsoft-Decision-1 is a little stronger alone than Luna and gets no more from fusion.
 
-Jev is still the better reranker. Arm for arm, it's ahead by 0.025 to 0.030 NDCG@10 on the hybrid and fusion pipelines (the CIs exclude zero against all three Jev runs) and by 0.012 to 0.018 on the single-query baseline, which is borderline. By count, though, Luna gets close: 3.01 relevant documents in its top ten with fusion, against 3.13 and 3.17 for Jev. My sense is that some of the gap is in how it orders those ten rather than in which ones it finds, though I haven't tested that.
+What I'd still stand behind is the part that held for all six rerankers: fusion's lift was positive for every one of them, it was larger for each decision model than for any cross-encoder, and it was largest for Jev. How much of that comes from the kind of model and how much from the particular model, three decision models on one corpus can't settle.
 
 A few other things from the runs:
 
-- **Section 3's pattern holds with five rerankers.** Reranking each list and then fusing gives -0.008 (rubric) and -0.016 (yes/no) under Luna, neither significant, which sits between bge-large's +0.025 and Jev's -0.017.
-- **Hybrid on its own does nothing under Luna** (-0.002 and -0.010, both n.s.), where it adds +0.010 to +0.015 under Jev and the cross-encoders. I don't know why yet.
-- **The yes/no and rubric questions come out the same.** Luna's probabilities come back rounded to two decimals and are close to binary (two to six distinct values in a pool of 50), so most of a pool ties and keeps its retrieval order. On NFCorpus that cost nothing I could measure.
-- **Luna is deterministic.** Two identical calls gave identical scores, where Jev moves 48% of its scores between calls. It refused nothing.
-- **It costs more.** About $2.50 per 1,000 queries to rerank 50 abstracts, against $0.95 for Jev, assuming Luna's standard $0.10 per million input tokens applies. OpenAI hasn't published a separate price, and the API is still in limited preview.
+- **Section 3's pattern holds with six rerankers.** Reranking each list and then fusing gives -0.008 and -0.016 under Luna and -0.015 and -0.016 under Microsoft-Decision-1, none of them significant, which sits between bge-large's +0.025 and Jev's -0.017.
+- **Hybrid on its own adds little under either newcomer:** -0.002 and -0.010 under Luna, +0.007 and +0.009 under Microsoft-Decision-1, none of it significant. Luna is the only reranker where it comes out below zero, against +0.003 to +0.015 for the others, but that may well be noise.
+- **The yes/no and rubric questions come out the same** for both newcomers, as they did for Jev. Luna's probabilities come back rounded to two decimals and are close to binary (two to six distinct values in a pool of 50), so most of a pool ties and keeps its retrieval order; on NFCorpus that cost nothing I could measure. Microsoft-Decision-1's scores are much finer-grained.
+- **Luna is deterministic.** Two identical calls gave identical scores, where Jev moves 48% of its scores between calls. Microsoft-Decision-1 wobbles about as much as Jev: in a three-query probe most scores moved, by 0.03 at most.
+- **Cost.** Microsoft-Decision-1 is priced the same as Jev, so it should come to about $0.95 per 1,000 queries to rerank 50 abstracts. Luna costs about $2.50, assuming its standard $0.10 per million input tokens applies; OpenAI hasn't published a separate price, and the API is still in limited preview.
 
 ## What I'd take from this
 
@@ -244,14 +246,14 @@ Here's the plain version of why adding Jev made RAG-Fusion work better. Fusion i
 
 The replication's core claim is sturdier than it was yesterday: fusion reliably improves retrieval after reranking, on every reranker I've tried, and most of all on the strongest one. The claim about answers is weaker than I made it sound. I think the honest version is that fusion measurably improves what gets retrieved, and that its effect on final answers is positive but smaller than one LLM-judge run can resolve.
 
-OpenAI's Decisions API (section 8) makes me think this is less about Jev than about the kind of model it is. Both decision models I've tried keep their accuracy when fusion widens the pool, and neither of them was built to rerank.
+The two other decision models in section 8 suggest it's partly about the kind of model Jev is and partly about Jev itself. Both get more out of fusion than any cross-encoder, and neither was built to rerank, but neither gets as much as Jev.
 
 For Jev specifically, the useful place turned out to be the obvious one, the reranker, where it's both the strongest and the best partner for fusion. Putting a decision model inside fusion (weighting, routing, gating) mostly ran into the pipeline's own structure: the reranker washes out anything that only changes the pool, and the judge can't see what the gate is for.
 
 ## Caveats
 
-- One corpus, 200 queries, and four rerankers. The ordering trend in section 3 is four points (five with Luna in section 8).
-- Luna was run once per question type, on 7 October; the Jev runs are from 26 and 27 September. Luna is deterministic, so a second run wouldn't change its numbers, but a same-day run of both would make the comparison cleaner.
+- One corpus and 200 queries. The ordering trend in section 3 is four rerankers, six with the two decision models in section 8.
+- Luna and Microsoft-Decision-1 were run once per question type, on 7 and 10 October; the Jev runs are from 26 and 27 September. Luna is deterministic. Microsoft-Decision-1 isn't quite, but its run-to-run wobble is about Jev's size, and Jev's two runs agree within noise.
 - Jev reads documents whole while the cross-encoders truncate at 512 tokens. On NFCorpus that rarely binds, but on longer documents it would favour Jev.
 - The answer writer and the judge are the same model family in every run. A cross-family judge (Claude, say) is the obvious next check, alongside repeating the judge run to measure its own variance.
 - Answer-level runs A and C used `gpt-6-luna`; April used `gpt-5.1-chat-latest`. So the April-to-now change in answer results mixes the parser fix, the model change and judge noise.
@@ -287,6 +289,13 @@ python -m eval.steelman --sample 200 --rerank-model decisions-score:gpt-6-luna \
   --out experiments/openai-decisions-api/results/steelman_decisions_score_n200_run1.json
 python -m eval.steelman --sample 200 --rerank-model decisions:gpt-6-luna \
   --out experiments/openai-decisions-api/results/steelman_decisions_predicate_n200_run1.json
+
+# Microsoft-Decision-1 through OpenRouter, using the Jev client pointed at OpenRouter's SystemOne endpoint (section 8)
+export TYPESAFE_BASE_URL=https://openrouter.ai/api JEV_API_KEY=$OPENROUTER_API_KEY JEV_MODEL=microsoft/microsoft-decision-1
+JEV_CACHE_PATH=./msd1_cache_noul.json  python -m eval.steelman --sample 200 --rerank-model jev \
+  --out experiments/microsoft-decision-1/results/steelman_msd1_yesno_n200_run1.json
+JEV_CACHE_PATH=./msd1_cache_score.json python -m eval.steelman --sample 200 --rerank-model jev-score \
+  --out experiments/microsoft-decision-1/results/steelman_msd1_rubric_n200_run1.json
 
 # CIs for any steelman file
 python -m eval.bootstrap_ci <results>/steelman_jev_n200_run1.json

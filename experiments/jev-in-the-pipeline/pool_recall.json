@@ -60,6 +60,22 @@
       "share_of_pool_gain": 0.522,
       "pool_to_top10_rate_alone": 0.473,
       "pool_to_top10_rate_fusion": 0.478
+    },
+    "MSD1 yes/no": {
+      "alone": 2.72,
+      "with_fusion": 2.97,
+      "gain": 0.25,
+      "share_of_pool_gain": 0.373,
+      "pool_to_top10_rate_alone": 0.484,
+      "pool_to_top10_rate_fusion": 0.472
+    },
+    "MSD1 rubric": {
+      "alone": 2.75,
+      "with_fusion": 3.0,
+      "gain": 0.25,
+      "share_of_pool_gain": 0.373,
+      "pool_to_top10_rate_alone": 0.489,
+      "pool_to_top10_rate_fusion": 0.477
     }
   }
 }
