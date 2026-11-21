@@ -186,3 +186,11 @@ python evaluate.py --sample 100 --k 5 10 --data-dir ./datasets
 ```
 
 The NFCorpus dataset (~3MB) is downloaded automatically on first run. ChromaDB embeddings are persisted locally so subsequent runs skip ingestion.
+## About the author
+
+I'm Adrian Raudaschl. I lead product for [LeapSpace](https://www.sciencedirect.com/leapspace), Elsevier's research-grade AI workspace, and built the original Scopus AI prototype. Before product work I was an NHS doctor.
+
+- [More about me](https://adrianraudaschl.com/about/)
+- [RAG-Fusion project page](https://adrianraudaschl.com/projects/rag-fusion/): how the technique came about and where it went
+- [SeqRAG: Agents for the Rest of Us](https://adrianraudaschl.com/blog/seqrag-agents-for-the-rest-of-us/): a later article on sequential retrieval for faster, more reliable agents
+- [Other writing](https://adrianraudaschl.com/blog/) on AI, search and product, with an [RSS feed](https://adrianraudaschl.com/blog/feed.xml)
