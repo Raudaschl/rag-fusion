@@ -28,6 +28,8 @@ RUNS = {
     "Luna predicate": "../../openai-decisions-api/results/steelman_decisions_predicate_n200_run1.json",
     "MSD1 yes/no": "../../microsoft-decision-1/results/steelman_msd1_yesno_n200_run1.json",
     "MSD1 rubric": "../../microsoft-decision-1/results/steelman_msd1_rubric_n200_run1.json",
+    "MSD1.1 yes/no": "../../microsoft-decision-1/results/steelman_msd11_yesno_n200_run1.json",
+    "MSD1.1 rubric": "../../microsoft-decision-1/results/steelman_msd11_rubric_n200_run1.json",
     "Gemini yes/no": "../../gemini-decision-1/results/steelman_gemini_yesno_n200_run1.json",
     "Gemini rubric": "../../gemini-decision-1/results/steelman_gemini_rubric_n200_run1.json",
 }

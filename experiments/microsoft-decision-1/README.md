@@ -53,6 +53,34 @@ Microsoft-Decision-1 sits partway. It does better with fusion's extra documents 
 well as Luna or Jev, and its accuracy slips a little on the wider pool where theirs holds. That's why section 8 now
 describes this as a gradient that decision models sit high on rather than a clean split between kinds of model.
 
+## Microsoft-Decision-1.1
+
+*Added 22 November 2026.*
+
+Microsoft released Microsoft-Decision-1.1 on 17 November, as the successor to 1.0, at the same price and with the
+same 32,768-token context. I ran it the same way: through OpenRouter, with the Jev client, the same prompts and
+30-document batches, on the same 200 queries.
+
+| Arm | Yes/no | Lift | Rubric | Lift |
+|---|---|---|---|---|
+| baseline+rerank | 0.375 | | 0.382 | |
+| hybrid+rerank | 0.375 | -0.000 [-0.016, +0.015] | 0.377 | -0.005 [-0.019, +0.008] |
+| fuse_then_rerank (vector only) | 0.389 | +0.015 [-0.002, +0.032] | 0.398 | +0.016 [-0.002, +0.035] |
+| hybrid_diverse+rerank | 0.403 | **+0.028** [+0.008, +0.050] | 0.414 | **+0.032** [+0.013, +0.053] |
+| rerank each list, then fuse (paper's order) | 0.345 | **-0.030** [-0.055, -0.006] | 0.345 | **-0.037** [-0.062, -0.014] |
+| hybrid, rerank each list, then fuse | 0.361 | -0.013 [-0.037, +0.010] | 0.362 | -0.020 [-0.044, +0.004] |
+
+It isn't measurably better than 1.0 as a reranker. Paired by query against 1.0 on the same question type, the
+rubric run differs by +0.004 on the baseline, -0.010 on hybrid and +0.001 with fusion, all within noise. The
+yes/no run is level on the baseline (-0.004) and a little behind on hybrid (-0.011) and with fusion (-0.014),
+where the CIs only just exclude zero ([-0.022, -0.000] and [-0.027, -0.001]). With one run each, and a model
+whose scores wobble between calls, I'd read that as no change rather than a regression.
+
+Against the others it sits where 1.0 did: well ahead of bge-large on every arm, tied with Luna on every arm, and
+behind Jev and Gemini Decision 1 by 0.018 to 0.035 with fusion (every CI excludes zero). On the mechanism it is
+also unchanged: 35% (yes/no) and 34% (rubric) of fusion's extra finds reach its top ten, against 37% for 1.0,
+and its hit rate on the pool slips from 48% to 47% and from 50% to 48%.
+
 ## How it behaves
 
 - **Fine-grained scores.** In a three-query probe it gave 15 to 19 distinct yes/no probabilities per 30
@@ -87,4 +115,7 @@ JEV_CACHE_PATH=./msd1_cache_noul.json  python -m eval.steelman --sample 200 --re
 JEV_CACHE_PATH=./msd1_cache_score.json python -m eval.steelman --sample 200 --rerank-model jev-score \
   --out experiments/microsoft-decision-1/results/steelman_msd1_rubric_n200_run1.json
 python -m eval.bootstrap_ci experiments/microsoft-decision-1/results/steelman_msd1_yesno_n200_run1.json
+
+# Microsoft-Decision-1.1: the same, with JEV_MODEL=microsoft/microsoft-decision-1.1, separate cache paths
+# (msd1_cache_v11_noul.json, msd1_cache_v11_score.json) and steelman_msd11_{yesno,rubric}_n200_run1.json as outputs
 ```

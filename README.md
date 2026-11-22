@@ -15,7 +15,7 @@ For the full story behind the approach, see the article: [Forget RAG, the Future
 > Write-ups:
 > - [`experiments/jev-in-the-pipeline/`](./experiments/jev-in-the-pipeline/README.md) (September 2026): four rerankers including Jev, a decision model from TypeSafe; cost and latency per configuration; three ways of putting Jev inside fusion; a narrated explainer video; and a rewrite-parser bug found and fixed along the way.
 > - [`experiments/openai-decisions-api/`](./experiments/openai-decisions-api/README.md) (October 2026): OpenAI's Decisions API (GPT-6 Luna) as a reranker, a second decision model alongside Jev. Summarised in section 8 of the Jev write-up.
-> - [`experiments/microsoft-decision-1/`](./experiments/microsoft-decision-1/README.md) (October 2026): Microsoft-Decision-1 through OpenRouter, a third decision model, run with the Jev client unchanged. Also in section 8.
+> - [`experiments/microsoft-decision-1/`](./experiments/microsoft-decision-1/README.md) (October 2026): Microsoft-Decision-1 through OpenRouter, a third decision model, run with the Jev client unchanged, plus its successor Microsoft-Decision-1.1 (November), which comes out the same. Also in section 8.
 > - [`experiments/gemini-decision-1/`](./experiments/gemini-decision-1/README.md) (November 2026): Google's Gemini Decision 1 (the Gemini Decisions API) through OpenRouter, a fourth decision model, which ties Jev. Also in section 8.
 > - [`experiments/arxiv-2603-02153-replication/`](./experiments/arxiv-2603-02153-replication/README.md) (April 2026): the replication of arXiv [2603.02153v1](https://arxiv.org/html/2603.02153v1), with a correction note for the parser bug.
 
