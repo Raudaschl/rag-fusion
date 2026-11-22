@@ -17,6 +17,9 @@ Three reranker backends:
   - OpenAI Decisions API (hosted, GPT-6 Luna) — invoked as "decisions:<model>" for the yes/no
     predicate or "decisions-score:<model>" for the four-level rubric, e.g.
     "decisions-score:gpt-6-luna". Scores from eval/decisions.py.
+  - Gemini Decisions API (hosted, Gemini Decision 1) — invoked as "gemini-decisions:<model>"
+    for the yes/no (noul) question or "gemini-decisions-score:<model>" for the four-level
+    rubric, e.g. "gemini-decisions-score:gemini-decision-1". Scores from eval/gemini_decisions.py.
 """
 
 _backend = None
@@ -52,6 +55,13 @@ def _get_backend(model_name):
 
         def score(query, texts):
             return decisions_relevance(query, texts, kind=kind, model=decisions_model)
+    elif model_name.startswith(("gemini-decisions:", "gemini-decisions-score:")):
+        from eval.gemini_decisions import relevance as gemini_relevance
+        prefix, gemini_model = model_name.split(":", 1)
+        kind = "score" if prefix == "gemini-decisions-score" else "noul"
+
+        def score(query, texts):
+            return gemini_relevance(query, texts, kind=kind, model=gemini_model)
     elif model_name == "flashrank" or model_name.startswith("flashrank:"):
         from flashrank import Ranker, RerankRequest
         flash_model = (model_name.split(":", 1)[1]

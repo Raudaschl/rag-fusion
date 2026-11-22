@@ -1,8 +1,8 @@
 # Microsoft-Decision-1 as a reranker
 
 October 2026. NFCorpus, n=200, the same sample and arms as the Jev and OpenAI Decisions API runs. Section 8 of
-[`../jev-in-the-pipeline/`](../jev-in-the-pipeline/README.md#8-two-more-decision-models-openais-decisions-api-and-microsoft-decision-1)
-puts the three decision models side by side; this page has the detail.
+[`../jev-in-the-pipeline/`](../jev-in-the-pipeline/README.md#8-three-more-decision-models-openai-microsoft-and-google)
+puts the decision models side by side (four of them since Gemini Decision 1 was added in November); this page has the detail.
 
 ## What it is
 

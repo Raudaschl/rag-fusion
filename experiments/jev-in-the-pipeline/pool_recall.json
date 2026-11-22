@@ -76,6 +76,22 @@
       "share_of_pool_gain": 0.373,
       "pool_to_top10_rate_alone": 0.489,
       "pool_to_top10_rate_fusion": 0.477
+    },
+    "Gemini yes/no": {
+      "alone": 2.76,
+      "with_fusion": 3.155,
+      "gain": 0.395,
+      "share_of_pool_gain": 0.59,
+      "pool_to_top10_rate_alone": 0.491,
+      "pool_to_top10_rate_fusion": 0.501
+    },
+    "Gemini rubric": {
+      "alone": 2.815,
+      "with_fusion": 3.14,
+      "gain": 0.325,
+      "share_of_pool_gain": 0.485,
+      "pool_to_top10_rate_alone": 0.5,
+      "pool_to_top10_rate_fusion": 0.499
     }
   }
 }
